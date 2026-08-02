@@ -38,6 +38,15 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+function getCatalogIdFromLocalBookId(localBookId: string): string | null {
+  return (
+    STARTER_CATALOG_BOOKS.find(
+      (catalogBook) =>
+        catalogBook.catalogId && localBookId.endsWith(`-${catalogBook.catalogId}`),
+    )?.catalogId ?? null
+  );
+}
+
 export default function LibraryScreen() {
   const db = useSQLiteContext();
   const user = useAuthStore((state) => state.user);
@@ -75,13 +84,24 @@ export default function LibraryScreen() {
       const data = await repo.getAllBooks(sortBy, 'DESC');
       setBooks(data);
 
-      // Resolve missing covers from backend (covers are generated asynchronously)
+      // Catalog copies use a public shared-cover URL. Unlike private user books,
+      // React Native's Image cannot attach the user's bearer token to an image
+      // request, so catalog artwork must not use the protected /books/{id}/cover URL.
       const { apiClient } = require('../src/services/apiClient');
       const { API_CONFIG } = require('../src/constants/config');
-      const booksNeedingCover = data.filter((b: LocalBook) => !b.coverUri && b.backendBookId);
-      if (booksNeedingCover.length > 0) {
-        let anyUpdated = false;
-        for (const b of booksNeedingCover) {
+      let anyUpdated = false;
+      for (const b of data) {
+        const catalogId = getCatalogIdFromLocalBookId(b.id);
+        if (catalogId) {
+          const catalogCoverUrl = getCatalogCoverUrl(catalogId);
+          if (b.coverUri !== catalogCoverUrl) {
+            await repo.updateCoverUri(b.id, catalogCoverUrl);
+            anyUpdated = true;
+          }
+          continue;
+        }
+
+        if (!b.coverUri && b.backendBookId) {
           try {
             await apiClient.get(`/books/${b.backendBookId}/cover`, {
               responseType: 'arraybuffer',
@@ -94,10 +114,10 @@ export default function LibraryScreen() {
             // Cover not ready yet or not available
           }
         }
-        if (anyUpdated) {
-          const refreshed = await repo.getAllBooks(sortBy, 'DESC');
-          setBooks(refreshed);
-        }
+      }
+      if (anyUpdated) {
+        const refreshed = await repo.getAllBooks(sortBy, 'DESC');
+        setBooks(refreshed);
       }
     } catch (e) {
       console.error('Error loading books:', e);
@@ -155,7 +175,7 @@ export default function LibraryScreen() {
         originalFileName: backendBook.originalFilename,
         title: backendBook.title || catalogBook.title || 'Untitled Book',
         author: backendBook.author || catalogBook.author || null,
-        coverUri: null,
+        coverUri: getCatalogCoverUrl(catalogId),
         fileSize: backendBook.fileSize || 0,
         fileHash: backendBook.fileHash || null,
         totalPages: backendBook.pageCount || 1,
