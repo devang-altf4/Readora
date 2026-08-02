@@ -9,15 +9,25 @@ from app.core.config import settings
 class LocalStorageService(AbstractStorageService):
 
     def __init__(self, root_dir: str = settings.STORAGE_ROOT):
-        self.root_dir = Path(root_dir).resolve()
-        self.originals_dir = self.root_dir / "originals"
-        self.covers_dir = self.root_dir / "covers"
-        self.processed_dir = self.root_dir / "processed"
-        self.temporary_dir = self.root_dir / "temporary"
+        try:
+            self.root_dir = Path(root_dir).resolve()
+            self.originals_dir = self.root_dir / "originals"
+            self.covers_dir = self.root_dir / "covers"
+            self.processed_dir = self.root_dir / "processed"
+            self.temporary_dir = self.root_dir / "temporary"
 
-        # Ensure directories exist
-        for directory in [self.originals_dir, self.covers_dir, self.processed_dir, self.temporary_dir]:
-            directory.mkdir(parents=True, exist_ok=True)
+            # Ensure directories exist
+            for directory in [self.originals_dir, self.covers_dir, self.processed_dir, self.temporary_dir]:
+                directory.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError):
+            # Fallback if specified path is not writable (e.g. /var/data on Render Free tier without a persistent disk)
+            self.root_dir = Path("./storage").resolve()
+            self.originals_dir = self.root_dir / "originals"
+            self.covers_dir = self.root_dir / "covers"
+            self.processed_dir = self.root_dir / "processed"
+            self.temporary_dir = self.root_dir / "temporary"
+            for directory in [self.originals_dir, self.covers_dir, self.processed_dir, self.temporary_dir]:
+                directory.mkdir(parents=True, exist_ok=True)
 
     async def save_original(self, book_id: str, file_data: bytes, extension: str = ".pdf") -> str:
         relative_key = f"originals/{book_id}{extension}"
