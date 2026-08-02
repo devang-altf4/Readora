@@ -22,7 +22,7 @@ import { useAppColors } from '../src/theme/useAppColors';
 import { useThemeStore } from '../src/state/useThemeStore';
 import { BookCoverCard } from '../src/components/BookCoverCard';
 import { useAuthStore } from '../src/state/useAuthStore';
-import { addCatalogBook, listCatalogBooks } from '../src/services/catalogService';
+import { addCatalogBook, listCatalogBooks, STARTER_CATALOG_BOOKS } from '../src/services/catalogService';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -44,7 +44,7 @@ export default function LibraryScreen() {
   const { themeMode, setThemeMode } = useThemeStore();
 
   const [books, setBooks] = useState<LocalBook[]>([]);
-  const [catalogBooks, setCatalogBooks] = useState<BackendBookResponse[]>([]);
+  const [catalogBooks, setCatalogBooks] = useState<BackendBookResponse[]>(STARTER_CATALOG_BOOKS);
   const [addingCatalogId, setAddingCatalogId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
@@ -122,6 +122,7 @@ export default function LibraryScreen() {
       })
       .catch((error) => {
         console.warn('Starter catalog unavailable:', error);
+        setCatalogBooks(STARTER_CATALOG_BOOKS);
       });
     return () => {
       active = false;
@@ -475,7 +476,7 @@ export default function LibraryScreen() {
                 <Text style={[styles.librarySectionTitle, { color: colors.textPrimary }]}>Starter Library</Text>
                 <Text style={[styles.catalogHint, { color: colors.textSecondary }]}>Free for everyone</Text>
               </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catalogScrollContent}>
+              <View style={styles.catalogGrid}>
                 {catalogBooks.map((catalogBook) => {
                   const alreadyAdded = Boolean(
                     user?.id &&
@@ -488,8 +489,8 @@ export default function LibraryScreen() {
                       <BookCoverCard
                         title={catalogBook.title || 'Untitled Book'}
                         author={catalogBook.author}
-                        height={156}
-                        width={108}
+                        height={138}
+                        width="100%"
                         isNew={!alreadyAdded}
                       />
                       <Text style={[styles.catalogTitle, { color: colors.textPrimary }]} numberOfLines={2}>{catalogBook.title}</Text>
@@ -504,7 +505,7 @@ export default function LibraryScreen() {
                     </View>
                   );
                 })}
-              </ScrollView>
+              </View>
             </View>
           )}
 
@@ -823,37 +824,40 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
-  catalogScrollContent: {
-    gap: 10,
+  catalogGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
     paddingVertical: 2,
   },
   catalogCard: {
-    width: 132,
-    padding: 8,
+    width: '31.5%',
+    padding: 6,
     borderRadius: 10,
     borderWidth: 1,
   },
   catalogTitle: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    lineHeight: 16,
-    marginTop: 8,
+    lineHeight: 14,
+    marginTop: 7,
   },
   catalogAuthor: {
-    fontSize: 10,
+    fontSize: 9,
     marginTop: 2,
-    marginBottom: 8,
+    marginBottom: 7,
   },
   catalogAddButton: {
     minHeight: 30,
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
+    paddingHorizontal: 3,
   },
   catalogAddButtonText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
   },
   libraryActionRow: {

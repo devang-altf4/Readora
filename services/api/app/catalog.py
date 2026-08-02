@@ -60,15 +60,45 @@ async def _seed_catalog_book(
         logger.warning("Catalog asset is missing: %s", asset_path)
         return
 
-    existing = await collection.find_one({"catalogId": catalog_id})
+    file_bytes = await asyncio.to_thread(asset_path.read_bytes)
+    file_hash = hashlib.sha256(file_bytes).hexdigest()
+    existing = await collection.find_one({"catalogId": catalog_id, "isCatalog": True})
+    if not existing:
+        # Earlier imports made before account ownership (or an interrupted
+        # catalog seed) have the same content hash but no owner. Reuse that
+        # record as the shared catalog source instead of inserting a second
+        # ownerless document that would collide with MongoDB's old index.
+        existing = await collection.find_one(
+            {
+                "fileHash": file_hash,
+                "isCatalog": {"$ne": True},
+                "$or": [{"userId": {"$exists": False}}, {"userId": None}],
+            }
+        )
+        if existing:
+            logger.info("Promoting ownerless book %s into catalog item %s", existing["_id"], catalog_id)
+
     if existing and existing.get("processingStatus") in {"ready", "ocr_required"}:
         storage = existing.get("storage", {})
         original_exists = bool(storage.get("originalFileKey")) and await storage_service.file_exists(storage["originalFileKey"])
         html_exists = bool(storage.get("processedHtmlKey")) and await storage_service.file_exists(storage["processedHtmlKey"])
         if original_exists and html_exists:
+            if existing.get("catalogId") != catalog_id or not existing.get("isCatalog"):
+                await collection.update_one(
+                    {"_id": existing["_id"]},
+                    {
+                        "$set": {
+                            "catalogId": catalog_id,
+                            "isCatalog": True,
+                            "storageShared": True,
+                            "title": item["title"],
+                            "author": item["author"],
+                        },
+                        "$unset": {"userId": ""},
+                    },
+                )
             return
 
-    file_bytes = await asyncio.to_thread(asset_path.read_bytes)
     extension = get_book_extension(item["filename"])
     book_id = str(existing.get("_id")) if existing else f"catalog-{catalog_id}"
     original_key = await storage_service.save_original(book_id, file_bytes, extension=extension)
@@ -85,7 +115,7 @@ async def _seed_catalog_book(
         "author": item["author"],
         "mimeType": get_book_mime_type(item["filename"]),
         "fileSize": len(file_bytes),
-        "fileHash": hashlib.sha256(file_bytes).hexdigest(),
+        "fileHash": file_hash,
         "pageCount": 0,
         "textPageCount": 0,
         "documentType": "text_based",

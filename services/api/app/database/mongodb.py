@@ -44,7 +44,11 @@ async def ensure_indexes():
         IndexModel(
             [("userId", ASCENDING), ("fileHash", ASCENDING)],
             unique=True,
-            sparse=True,
+            # Catalog records and legacy records deliberately have no owner.
+            # Only enforce duplicate hashes within an actual signed-in user's
+            # library; otherwise MongoDB treats absent userId values as null
+            # and blocks separate shared catalog records.
+            partialFilterExpression={"userId": {"$type": "string"}},
             name="idx_user_file_hash",
         ),
         IndexModel([("processingStatus", ASCENDING)], name="idx_processing_status"),
@@ -66,6 +70,16 @@ async def ensure_indexes():
             await books_collection.drop_index("idx_file_hash")
         except Exception:
             pass
+        current_indexes = await books_collection.index_information()
+        current_user_hash_index = current_indexes.get("idx_user_file_hash")
+        desired_filter = {"userId": {"$type": "string"}}
+        if (
+            current_user_hash_index
+            and current_user_hash_index.get("partialFilterExpression") != desired_filter
+        ):
+            # Upgrade the earlier sparse compound index, which indexed
+            # ownerless catalog rows as null.
+            await books_collection.drop_index("idx_user_file_hash")
         await books_collection.create_indexes(indexes)
         await users_collection.create_index("username", unique=True, name="idx_username_unique")
         await sessions_collection.create_index(

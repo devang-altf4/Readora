@@ -30,6 +30,9 @@ async def add_catalog_book(
     book_service: BookService = Depends(get_book_service),
     current_user: dict = Depends(get_current_user),
 ):
+    # Seed lazily as well as at startup. This repairs a partially seeded
+    # database without requiring a manual migration or data cleanup.
+    await ensure_catalog_books()
     book = await book_service.add_catalog_book(current_user["_id"], catalog_id)
     if not book:
         raise HTTPException(
