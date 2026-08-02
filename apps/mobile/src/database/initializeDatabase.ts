@@ -20,6 +20,7 @@ export async function initializeDatabase(db: SQLite.SQLiteDatabase): Promise<voi
       lastOpenedAt TEXT,
       importedAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
+      ownerUserId TEXT,
       backendBookId TEXT,
       backendProcessingStatus TEXT DEFAULT 'offline_only',
       backendProcessingProgress INTEGER DEFAULT 0,
@@ -49,4 +50,11 @@ export async function initializeDatabase(db: SQLite.SQLiteDatabase): Promise<voi
       updatedAt TEXT NOT NULL
     );
   `);
+
+  // Add ownership to databases created before account support. Existing local
+  // books are claimed by the first signed-in account on this device.
+  const bookColumns = await db.getAllAsync<{ name: string }>('PRAGMA table_info(books)');
+  if (!bookColumns.some((column) => column.name === 'ownerUserId')) {
+    await db.execAsync('ALTER TABLE books ADD COLUMN ownerUserId TEXT');
+  }
 }

@@ -16,21 +16,27 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { StatusBar } from 'expo-status-bar';
 import { BookSQLiteRepository } from '../src/database/repositories/bookRepository';
 import { getBookExtension, importBook } from '../src/services/importService';
-import { LocalBook } from '../src/types';
+import { BackendBookResponse, LocalBook } from '../src/types';
 import { useLibraryStore } from '../src/state/useLibraryStore';
 import { useAppColors } from '../src/theme/useAppColors';
 import { useThemeStore } from '../src/state/useThemeStore';
 import { BookCoverCard } from '../src/components/BookCoverCard';
+import { useAuthStore } from '../src/state/useAuthStore';
+import { addCatalogBook, listCatalogBooks } from '../src/services/catalogService';
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
-  const repo = new BookSQLiteRepository(db);
+  const user = useAuthStore((state) => state.user);
+  const logout = useAuthStore((state) => state.logout);
+  const repo = new BookSQLiteRepository(db, user?.id || '');
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const colors = useAppColors();
   const { themeMode, setThemeMode } = useThemeStore();
 
   const [books, setBooks] = useState<LocalBook[]>([]);
+  const [catalogBooks, setCatalogBooks] = useState<BackendBookResponse[]>([]);
+  const [addingCatalogId, setAddingCatalogId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [importing, setImporting] = useState(false);
   const [activeTab, setActiveTab] = useState<'home' | 'library' | 'settings'>('home');
@@ -79,6 +85,66 @@ export default function LibraryScreen() {
   useEffect(() => {
     loadBooks();
   }, [sortBy]);
+
+  useEffect(() => {
+    let active = true;
+    listCatalogBooks()
+      .then((data) => {
+        if (active) setCatalogBooks(data);
+      })
+      .catch((error) => {
+        console.warn('Starter catalog unavailable:', error);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleAddCatalogBook = async (catalogBook: BackendBookResponse) => {
+    const catalogId = catalogBook.catalogId;
+    if (!catalogId || addingCatalogId) return;
+
+    const localCatalogId = `catalog-${user?.id || 'user'}-${catalogId}`;
+    const existingLocal = books.find((book) => book.id === localCatalogId);
+    if (existingLocal) {
+      router.push(`/reader/smart/${existingLocal.id}`);
+      return;
+    }
+
+    try {
+      setAddingCatalogId(catalogId);
+      const backendBook = await addCatalogBook(catalogId);
+      const now = new Date().toISOString();
+      const localBook: LocalBook = {
+        id: localCatalogId,
+        localFileUri: '',
+        originalFileName: backendBook.originalFilename,
+        title: backendBook.title || catalogBook.title || 'Untitled Book',
+        author: backendBook.author || catalogBook.author || null,
+        coverUri: null,
+        fileSize: backendBook.fileSize || 0,
+        fileHash: backendBook.fileHash || null,
+        totalPages: backendBook.pageCount || 1,
+        currentPage: 1,
+        readingProgress: 0,
+        lastOpenedAt: null,
+        importedAt: now,
+        updatedAt: now,
+        backendBookId: backendBook._id,
+        backendProcessingStatus: (backendBook.processingStatus || 'ready') as LocalBook['backendProcessingStatus'],
+        backendProcessingProgress: backendBook.processingProgress ?? 100,
+        smartModeAvailable: backendBook.processingStatus === 'ready' || backendBook.processingStatus === 'ocr_required',
+        cachedSmartContentUri: null,
+      };
+      await repo.insertBook(localBook);
+      await loadBooks();
+      Alert.alert('Added to Library', `${localBook.title} is ready to read.`);
+    } catch (error: any) {
+      Alert.alert('Could Not Add Book', error?.message || 'Please try again.');
+    } finally {
+      setAddingCatalogId(null);
+    }
+  };
 
   const handleImport = async () => {
     try {
@@ -251,20 +317,69 @@ export default function LibraryScreen() {
               </TouchableOpacity>
             </View>
           </View>
+          <View style={[styles.settingCard, { backgroundColor: colors.cardBg, borderColor: colors.divider }]}>
+            <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Account</Text>
+            <Text style={[styles.accountText, { color: colors.textSecondary }]}>{user?.username}</Text>
+            <TouchableOpacity
+              style={[styles.logoutButton, { borderColor: colors.divider }]}
+              onPress={() => void logout()}
+            >
+              <Text style={[styles.logoutButtonText, { color: colors.textPrimary }]}>Sign out</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       ) : (
         <ScrollView style={styles.mainScrollView} contentContainerStyle={styles.mainScrollContent}>
-          {/* Welcome to Readora Greeting Banner */}
-          <View style={[styles.welcomeCard, { backgroundColor: colors.welcomeBannerBg }]}>
-            <Text style={[styles.accentDecoration, { color: colors.isDark ? '#3B82F6' : '#5F635F' }]}>
-              ▼  ▲  ▼  ▲  ▼  ▲  ▼
-            </Text>
-            <Text style={[styles.welcomeTitle, { color: colors.welcomeBannerText }]}>
-              Welcome to Readora
-            </Text>
-            <Text style={[styles.welcomeSubtitle, { color: colors.welcomeBannerSubtext }]}>
-              Discover a quiet reading experience in reflowable Readora Smart Mode.
-            </Text>
+          {/* Stitch MCP Generated Flashy Hero Welcome Card */}
+          <View style={[
+            styles.stitchHeroCard,
+            {
+              backgroundColor: colors.isDark ? '#0C0A19' : '#F4ECE1',
+              borderColor: colors.isDark ? 'rgba(139, 92, 246, 0.35)' : '#D6C8B4',
+            }
+          ]}>
+            {/* Ambient Mesh Glow Accent Layers */}
+            <View style={[styles.stitchMeshGlowTop, { backgroundColor: colors.isDark ? '#6366F125' : '#D4A37330' }]} />
+            <View style={[styles.stitchMeshGlowBottom, { backgroundColor: colors.isDark ? '#8B5CF620' : '#C49A4520' }]} />
+
+            <View style={styles.stitchCardContent}>
+              {/* Logo Row */}
+              <View style={styles.stitchLogoHeaderRow}>
+                <View style={[styles.stitchLogoBadge, { backgroundColor: colors.isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)' }]}>
+                  <Text style={styles.stitchLogoEmoji}>📖</Text>
+                </View>
+                <View style={[styles.stitchSanctuaryTag, { backgroundColor: colors.isDark ? 'rgba(99, 102, 241, 0.18)' : 'rgba(196, 154, 69, 0.15)' }]}>
+                  <Text style={[styles.stitchSanctuaryText, { color: colors.isDark ? '#A5B4FC' : '#855B14' }]}>
+                    DIGITAL SANCTUARY
+                  </Text>
+                </View>
+              </View>
+
+              {/* Title & Tagline */}
+              <Text style={[styles.stitchHeroTitle, { color: colors.isDark ? '#FFFFFF' : '#1C1917' }]}>
+                Welcome to Readora
+              </Text>
+              <Text style={[styles.stitchHeroSubtitle, { color: colors.isDark ? '#CBD5E1' : '#57534E' }]}>
+                Your Sanctuary for Quiet, Distraction-Free Reading
+              </Text>
+
+              {/* Action Button */}
+              <TouchableOpacity
+                style={[
+                  styles.stitchStartBtn,
+                  {
+                    backgroundColor: colors.isDark ? '#FFFFFF' : '#171717',
+                    shadowColor: colors.isDark ? '#6366F1' : '#000000',
+                  }
+                ]}
+                activeOpacity={0.85}
+                onPress={handleImport}
+              >
+                <Text style={[styles.stitchStartBtnText, { color: colors.isDark ? '#0F172A' : '#FFFFFF' }]}>
+                  Start Reading ✨
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           {/* Secondary Filter Pills */}
@@ -293,6 +408,45 @@ export default function LibraryScreen() {
               );
             })}
           </ScrollView>
+
+          {catalogBooks.length > 0 && (
+            <View style={styles.catalogSection}>
+              <View style={styles.catalogHeaderRow}>
+                <Text style={[styles.librarySectionTitle, { color: colors.textPrimary }]}>Starter Library</Text>
+                <Text style={[styles.catalogHint, { color: colors.textSecondary }]}>Free for everyone</Text>
+              </View>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.catalogScrollContent}>
+                {catalogBooks.map((catalogBook) => {
+                  const alreadyAdded = Boolean(
+                    user?.id &&
+                    catalogBook.catalogId &&
+                    books.some((book) => book.id === `catalog-${user.id}-${catalogBook.catalogId}`)
+                  );
+                  const isAdding = addingCatalogId === catalogBook.catalogId;
+                  return (
+                    <View key={catalogBook.catalogId || catalogBook._id} style={[styles.catalogCard, { backgroundColor: colors.cardBg, borderColor: colors.divider }]}>
+                      <BookCoverCard
+                        title={catalogBook.title || 'Untitled Book'}
+                        author={catalogBook.author}
+                        height={156}
+                        width={108}
+                        isNew={!alreadyAdded}
+                      />
+                      <Text style={[styles.catalogTitle, { color: colors.textPrimary }]} numberOfLines={2}>{catalogBook.title}</Text>
+                      <Text style={[styles.catalogAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{catalogBook.author || 'Readora Book'}</Text>
+                      <TouchableOpacity
+                        style={[styles.catalogAddButton, { backgroundColor: alreadyAdded ? colors.divider : colors.accent }]}
+                        disabled={alreadyAdded || isAdding}
+                        onPress={() => void handleAddCatalogBook(catalogBook)}
+                      >
+                        {isAdding ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.catalogAddButtonText}>{alreadyAdded ? 'In Library' : 'Add to Library'}</Text>}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
 
           {/* Your Library Header Row */}
           <View style={styles.libraryActionRow}>
@@ -449,31 +603,91 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 80,
   },
-  welcomeCard: {
+  stitchHeroCard: {
     width: '100%',
-    paddingVertical: 20,
-    paddingHorizontal: 20,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    marginVertical: 14,
+    position: 'relative',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  stitchMeshGlowTop: {
+    position: 'absolute',
+    top: -50,
+    right: -50,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+  },
+  stitchMeshGlowBottom: {
+    position: 'absolute',
+    bottom: -60,
+    left: -40,
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+  },
+  stitchCardContent: {
+    padding: 22,
+    gap: 10,
+  },
+  stitchLogoHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  stitchLogoBadge: {
+    width: 42,
+    height: 42,
     borderRadius: 12,
     alignItems: 'center',
-    marginVertical: 12,
+    justifyContent: 'center',
   },
-  accentDecoration: {
-    fontSize: 10,
-    letterSpacing: 6,
-    marginBottom: 10,
-  },
-  welcomeTitle: {
+  stitchLogoEmoji: {
     fontSize: 22,
+  },
+  stitchSanctuaryTag: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  stitchSanctuaryText: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  stitchHeroTitle: {
+    fontSize: 26,
     fontWeight: 'bold',
     fontFamily: 'Playfair Display',
-    textAlign: 'center',
+    letterSpacing: -0.3,
+  },
+  stitchHeroSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
     marginBottom: 6,
   },
-  welcomeSubtitle: {
-    fontSize: 13,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    lineHeight: 18,
+  stitchStartBtn: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 4,
+    marginTop: 4,
+  },
+  stitchStartBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
   secondaryFilterContainer: {
     marginVertical: 8,
@@ -487,6 +701,52 @@ const styles = StyleSheet.create({
   secondaryPillText: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  catalogSection: {
+    marginTop: 14,
+  },
+  catalogHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  catalogHint: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  catalogScrollContent: {
+    gap: 10,
+    paddingVertical: 2,
+  },
+  catalogCard: {
+    width: 132,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  catalogTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 16,
+    marginTop: 8,
+  },
+  catalogAuthor: {
+    fontSize: 10,
+    marginTop: 2,
+    marginBottom: 8,
+  },
+  catalogAddButton: {
+    minHeight: 30,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  catalogAddButtonText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   libraryActionRow: {
     flexDirection: 'row',
@@ -619,11 +879,26 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 8,
     borderWidth: 1,
+    marginBottom: 14,
   },
   settingLabel: {
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 12,
+  },
+  accountText: {
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  logoutButton: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   themeOptionsRow: {
     gap: 10,

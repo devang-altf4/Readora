@@ -2,9 +2,16 @@ import * as SQLite from 'expo-sqlite';
 import { LocalBook, LocalBookmark, LocalReaderSettings } from '../../types';
 
 export class BookSQLiteRepository {
-  constructor(private db: SQLite.SQLiteDatabase) {}
+  constructor(private db: SQLite.SQLiteDatabase, private ownerUserId: string) {}
+
+  private async ensureOwnerScope(): Promise<void> {
+    if (!this.ownerUserId) return;
+    // Local books created before accounts belong to the first account on this device.
+    await this.db.runAsync('UPDATE books SET ownerUserId = ? WHERE ownerUserId IS NULL', [this.ownerUserId]);
+  }
 
   async getAllBooks(sortBy: string = 'lastOpenedAt', sortDir: string = 'DESC'): Promise<LocalBook[]> {
+    await this.ensureOwnerScope();
     let orderClause = 'ORDER BY importedAt DESC';
     if (sortBy === 'title') {
       orderClause = `ORDER BY title ${sortDir}`;
@@ -14,7 +21,7 @@ export class BookSQLiteRepository {
       orderClause = `ORDER BY readingProgress ${sortDir}`;
     }
 
-    const rows = await this.db.getAllAsync<any>(`SELECT * FROM books ${orderClause}`);
+    const rows = await this.db.getAllAsync<any>(`SELECT * FROM books WHERE ownerUserId = ? ${orderClause}`, [this.ownerUserId]);
     return rows.map(r => ({
       ...r,
       smartModeAvailable: Boolean(r.smartModeAvailable)
@@ -22,7 +29,8 @@ export class BookSQLiteRepository {
   }
 
   async getBookById(id: string): Promise<LocalBook | null> {
-    const row = await this.db.getFirstAsync<any>('SELECT * FROM books WHERE id = ?', [id]);
+    await this.ensureOwnerScope();
+    const row = await this.db.getFirstAsync<any>('SELECT * FROM books WHERE id = ? AND ownerUserId = ?', [id, this.ownerUserId]);
     if (!row) return null;
     return {
       ...row,
@@ -34,9 +42,9 @@ export class BookSQLiteRepository {
     await this.db.runAsync(
       `INSERT INTO books (
         id, localFileUri, originalFileName, title, author, coverUri, fileSize, fileHash,
-        totalPages, currentPage, readingProgress, lastOpenedAt, importedAt, updatedAt,
+        totalPages, currentPage, readingProgress, lastOpenedAt, importedAt, updatedAt, ownerUserId,
         backendBookId, backendProcessingStatus, backendProcessingProgress, smartModeAvailable, cachedSmartContentUri
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         book.id,
         book.localFileUri,
@@ -52,6 +60,7 @@ export class BookSQLiteRepository {
         book.lastOpenedAt || null,
         book.importedAt,
         book.updatedAt,
+        this.ownerUserId,
         book.backendBookId || null,
         book.backendProcessingStatus || 'offline_only',
         book.backendProcessingProgress || 0,
@@ -62,39 +71,44 @@ export class BookSQLiteRepository {
   }
 
   async updateReadingProgress(id: string, currentPage: number, totalPages: number, progress: number): Promise<void> {
+    await this.ensureOwnerScope();
     const now = new Date().toISOString();
     await this.db.runAsync(
-      `UPDATE books SET currentPage = ?, totalPages = ?, readingProgress = ?, lastOpenedAt = ?, updatedAt = ? WHERE id = ?`,
-      [currentPage, totalPages, progress, now, now, id]
+      `UPDATE books SET currentPage = ?, totalPages = ?, readingProgress = ?, lastOpenedAt = ?, updatedAt = ? WHERE id = ? AND ownerUserId = ?`,
+      [currentPage, totalPages, progress, now, now, id, this.ownerUserId]
     );
   }
 
   async updateBackendStatus(id: string, backendBookId: string, status: string, progress: number, smartAvailable: boolean): Promise<void> {
+    await this.ensureOwnerScope();
     const now = new Date().toISOString();
     await this.db.runAsync(
-      `UPDATE books SET backendBookId = ?, backendProcessingStatus = ?, backendProcessingProgress = ?, smartModeAvailable = ?, updatedAt = ? WHERE id = ?`,
-      [backendBookId, status, progress, smartAvailable ? 1 : 0, now, id]
+      `UPDATE books SET backendBookId = ?, backendProcessingStatus = ?, backendProcessingProgress = ?, smartModeAvailable = ?, updatedAt = ? WHERE id = ? AND ownerUserId = ?`,
+      [backendBookId, status, progress, smartAvailable ? 1 : 0, now, id, this.ownerUserId]
     );
   }
 
   async updateSmartContentCache(id: string, cachedSmartContentUri: string): Promise<void> {
+    await this.ensureOwnerScope();
     const now = new Date().toISOString();
     await this.db.runAsync(
-      `UPDATE books SET cachedSmartContentUri = ?, smartModeAvailable = 1, updatedAt = ? WHERE id = ?`,
-      [cachedSmartContentUri, now, id]
+      `UPDATE books SET cachedSmartContentUri = ?, smartModeAvailable = 1, updatedAt = ? WHERE id = ? AND ownerUserId = ?`,
+      [cachedSmartContentUri, now, id, this.ownerUserId]
     );
   }
 
   async updateCoverUri(id: string, coverUri: string): Promise<void> {
+    await this.ensureOwnerScope();
     const now = new Date().toISOString();
     await this.db.runAsync(
-      `UPDATE books SET coverUri = ?, updatedAt = ? WHERE id = ?`,
-      [coverUri, now, id]
+      `UPDATE books SET coverUri = ?, updatedAt = ? WHERE id = ? AND ownerUserId = ?`,
+      [coverUri, now, id, this.ownerUserId]
     );
   }
 
   async deleteBook(id: string): Promise<void> {
-    await this.db.runAsync('DELETE FROM books WHERE id = ?', [id]);
+    await this.ensureOwnerScope();
+    await this.db.runAsync('DELETE FROM books WHERE id = ? AND ownerUserId = ?', [id, this.ownerUserId]);
   }
 
   async getBookmarks(bookId: string): Promise<LocalBookmark[]> {

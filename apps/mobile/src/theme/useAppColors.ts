@@ -25,8 +25,9 @@ export function useAppColors() {
     chipActiveText: '#FFFFFF',
     bottomBarBg: isDark ? '#000000' : '#F5F3EC',
     accent: '#3B82F6',
-    welcomeBannerBg: isDark ? '#0E141D' : '#EAE7DC',
-    welcomeBannerText: isDark ? '#FFFFFF' : '#171717',
-    welcomeBannerSubtext: isDark ? '#94A3B8' : '#5F635F',
+    welcomeBannerBg: isDark ? '#0D1527' : '#F3EEE3',
+    welcomeBannerBorder: isDark ? 'rgba(59, 130, 246, 0.25)' : '#E2D9C8',
+    welcomeBannerText: isDark ? '#FFFFFF' : '#1C1917',
+    welcomeBannerSubtext: isDark ? '#94A3B8' : '#64748B',
   };
 }

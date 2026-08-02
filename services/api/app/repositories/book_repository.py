@@ -1,7 +1,6 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from pymongo.asynchronous.database import AsyncDatabase
-from pymongo import DESCENDING, ASCENDING
 import uuid
 
 class BookRepository:
@@ -19,13 +18,37 @@ class BookRepository:
         await self.collection.insert_one(book_data)
         return book_data
 
-    async def get_book_by_id(self, book_id: str) -> Optional[Dict[str, Any]]:
-        return await self.collection.find_one({"_id": book_id})
+    async def get_book_by_id(self, book_id: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        query: Dict[str, Any] = {"_id": book_id}
+        if user_id is not None:
+            query["userId"] = user_id
+        return await self.collection.find_one(query)
 
-    async def get_book_by_hash(self, file_hash: str) -> Optional[Dict[str, Any]]:
+    async def get_book_for_user(self, book_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        return await self.collection.find_one(
+            {
+                "_id": book_id,
+                "$or": [{"userId": user_id}, {"isCatalog": True}],
+            }
+        )
+
+    async def get_catalog_book(self, catalog_id: str) -> Optional[Dict[str, Any]]:
+        return await self.collection.find_one({"catalogId": catalog_id, "isCatalog": True})
+
+    async def list_catalog_books(self, limit: int = 50) -> List[Dict[str, Any]]:
+        cursor = self.collection.find({"isCatalog": True}).sort("title", 1).limit(limit)
+        return await cursor.to_list(length=limit)
+
+    async def get_user_catalog_copy(self, user_id: str, catalog_id: str) -> Optional[Dict[str, Any]]:
+        return await self.collection.find_one({"userId": user_id, "catalogId": catalog_id})
+
+    async def get_book_by_hash(self, file_hash: str, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         if not file_hash:
             return None
-        return await self.collection.find_one({"fileHash": file_hash})
+        query: Dict[str, Any] = {"fileHash": file_hash}
+        if user_id is not None:
+            query["userId"] = user_id
+        return await self.collection.find_one(query)
 
     async def list_books(
         self,
@@ -33,9 +56,12 @@ class BookRepository:
         limit: int = 50,
         status: Optional[str] = None,
         sort_by: str = "updatedAt",
-        sort_dir: int = -1
+        sort_dir: int = -1,
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         query = {}
+        if user_id is not None:
+            query["userId"] = user_id
         if status:
             query["processingStatus"] = status
 
@@ -74,6 +100,9 @@ class BookRepository:
             return_document=True
         )
 
-    async def delete_book(self, book_id: str) -> bool:
-        result = await self.collection.delete_one({"_id": book_id})
+    async def delete_book(self, book_id: str, user_id: Optional[str] = None) -> bool:
+        query: Dict[str, Any] = {"_id": book_id}
+        if user_id is not None:
+            query["userId"] = user_id
+        result = await self.collection.delete_one(query)
         return result.deleted_count > 0

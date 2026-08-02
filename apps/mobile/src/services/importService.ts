@@ -76,20 +76,26 @@ export async function uploadBookForSmartReading(
     smartModeAvailable
   );
 
-  // Persist the backend cover URL when the selected format contains a cover.
+  // Persist the backend cover URL instantly when the coverKey is returned in the upload response.
   let coverUri: string | null = null;
-  try {
-    const coverUrl = `${API_CONFIG.baseUrl}/books/${backendBook._id}/cover`;
-    // GET is supported by older API processes too; HEAD used to produce a
-    // noisy 405 in Expo Go while the cover was still being generated.
-    await apiClient.get(`/books/${backendBook._id}/cover`, {
-      responseType: 'arraybuffer',
-      timeout: 5000,
-    });
+  const hasCoverKey = Boolean(backendBook?.storage?.coverKey || backendBook?.coverKey);
+  const coverUrl = `${API_CONFIG.baseUrl}/books/${backendBook._id}/cover`;
+
+  if (hasCoverKey) {
     coverUri = coverUrl;
     await repo.updateCoverUri(book.id, coverUri);
-  } catch {
-    // Processing may still be running; the library refresh checks again later.
+  } else {
+    // Fallback GET check if coverKey was not explicitly returned
+    try {
+      await apiClient.get(`/books/${backendBook._id}/cover`, {
+        responseType: 'arraybuffer',
+        timeout: 2000,
+      });
+      coverUri = coverUrl;
+      await repo.updateCoverUri(book.id, coverUri);
+    } catch {
+      // Generated hardcover card will be used as fallback
+    }
   }
 
   return {

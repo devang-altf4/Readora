@@ -18,6 +18,7 @@ import { LocalBook } from '../../../src/types';
 import { apiClient } from '../../../src/services/apiClient';
 import { useThemeStore } from '../../../src/state/useThemeStore';
 import { getReaderFontFaceStyles } from '../../../src/utils/localFontLoader';
+import { useAuthStore } from '../../../src/state/useAuthStore';
 
 const EBOOK_READER_DEFAULTS = {
   fontSize: 16,
@@ -28,7 +29,8 @@ const EBOOK_READER_DEFAULTS = {
 export default function SmartReadingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
-  const repo = new BookSQLiteRepository(db);
+  const user = useAuthStore((state) => state.user);
+  const repo = new BookSQLiteRepository(db, user?.id || '');
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const appThemeMode = useThemeStore((state) => state.themeMode);

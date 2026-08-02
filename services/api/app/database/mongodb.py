@@ -37,17 +37,43 @@ async def ensure_indexes():
         return
 
     books_collection = db_manager.db.books
+    users_collection = db_manager.db.users
+    sessions_collection = db_manager.db.auth_sessions
 
     indexes = [
-        IndexModel([("fileHash", ASCENDING)], unique=True, sparse=True, name="idx_file_hash"),
+        IndexModel(
+            [("userId", ASCENDING), ("fileHash", ASCENDING)],
+            unique=True,
+            sparse=True,
+            name="idx_user_file_hash",
+        ),
         IndexModel([("processingStatus", ASCENDING)], name="idx_processing_status"),
         IndexModel([("createdAt", DESCENDING)], name="idx_created_at"),
         IndexModel([("updatedAt", DESCENDING)], name="idx_updated_at"),
         IndexModel([("processingStatus", ASCENDING), ("updatedAt", DESCENDING)], name="idx_status_updated"),
+        IndexModel(
+            [("userId", ASCENDING), ("catalogId", ASCENDING)],
+            unique=True,
+            sparse=True,
+            name="idx_user_catalog_unique",
+        ),
     ]
 
     try:
+        # Older versions enforced fileHash globally. Ownership makes the same
+        # title valid for multiple accounts, so replace that index safely.
+        try:
+            await books_collection.drop_index("idx_file_hash")
+        except Exception:
+            pass
         await books_collection.create_indexes(indexes)
+        await users_collection.create_index("username", unique=True, name="idx_username_unique")
+        await sessions_collection.create_index(
+            "expiresAt",
+            expireAfterSeconds=0,
+            name="idx_auth_session_expiry",
+        )
+        await sessions_collection.create_index("userId", name="idx_auth_session_user")
         logger.info("MongoDB indexes verified/created successfully.")
     except Exception as e:
         logger.warning(f"Note on MongoDB index creation: {e}")

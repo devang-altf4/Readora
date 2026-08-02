@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: str = "local"
     STORAGE_ROOT: str = "./storage"
     MAX_UPLOAD_SIZE_MB: int = 100
+    AUTH_SESSION_DAYS: int = 30
 
     LOG_LEVEL: str = "INFO"
     CORS_ORIGINS: str = "http://localhost:8081,http://127.0.0.1:8081,http://10.0.2.2:8081,*"

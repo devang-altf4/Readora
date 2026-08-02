@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status,
 from fastapi.responses import HTMLResponse, Response
 from typing import List
 from app.services.book_service import BookService
-from app.api.dependencies import get_book_service
+from app.api.dependencies import get_book_service, get_current_user
 from app.schemas.book import BookResponse
 from app.storage.local_storage import storage_service
 from app.processing.book_formats import (
@@ -18,7 +18,8 @@ MAX_BOOK_SIZE_BYTES = 100 * 1024 * 1024
 @router.post("/upload", response_model=BookResponse, status_code=status.HTTP_201_CREATED)
 async def upload_book(
     file: UploadFile = File(...),
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
     filename = file.filename or ""
     extension = get_book_extension(filename)
@@ -41,6 +42,7 @@ async def upload_book(
         )
 
     book_doc = await book_service.upload_book(
+        user_id=current_user["_id"],
         original_filename=filename,
         file_bytes=content,
         mime_type=get_book_mime_type(filename)
@@ -51,16 +53,18 @@ async def upload_book(
 async def list_books(
     skip: int = 0,
     limit: int = 50,
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
-    return await book_service.list_books(skip=skip, limit=limit)
+    return await book_service.list_books(current_user["_id"], skip=skip, limit=limit)
 
 @router.get("/{book_id}", response_model=BookResponse)
 async def get_book(
     book_id: str,
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
-    book = await book_service.get_book(book_id)
+    book = await book_service.get_book_for_user(book_id, current_user["_id"])
     if not book:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -72,9 +76,10 @@ async def get_book(
 async def trigger_processing(
     book_id: str,
     background_tasks: BackgroundTasks,
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
-    book = await book_service.get_book(book_id)
+    book = await book_service.get_book(book_id, current_user["_id"])
     if not book:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -88,9 +93,10 @@ async def trigger_processing(
 async def get_book_content(
     book_id: str,
     format: str = "html",
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
-    book = await book_service.get_book(book_id)
+    book = await book_service.get_book_for_user(book_id, current_user["_id"])
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found.")
 
@@ -117,9 +123,10 @@ async def get_book_content(
 @router.api_route("/{book_id}/cover", methods=["GET", "HEAD"])
 async def get_book_cover(
     book_id: str,
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
-    book = await book_service.get_book(book_id)
+    book = await book_service.get_book_for_user(book_id, current_user["_id"])
     if not book:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found.")
 
@@ -133,9 +140,10 @@ async def get_book_cover(
 @router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_book(
     book_id: str,
-    book_service: BookService = Depends(get_book_service)
+    book_service: BookService = Depends(get_book_service),
+    current_user: dict = Depends(get_current_user),
 ):
-    success = await book_service.delete_book(book_id)
+    success = await book_service.delete_book(book_id, current_user["_id"])
     if not success:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Book not found.")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

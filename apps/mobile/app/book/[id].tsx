@@ -18,11 +18,13 @@ import { LocalBook } from '../../src/types';
 import { apiClient } from '../../src/services/apiClient';
 import { useAppColors } from '../../src/theme/useAppColors';
 import { getBookExtension, getBookMimeType } from '../../src/services/importService';
+import { useAuthStore } from '../../src/state/useAuthStore';
 
 export default function BookDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
-  const repo = new BookSQLiteRepository(db);
+  const user = useAuthStore((state) => state.user);
+  const repo = new BookSQLiteRepository(db, user?.id || '');
   const router = useRouter();
   const colors = useAppColors();
 

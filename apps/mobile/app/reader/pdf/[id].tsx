@@ -14,11 +14,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BookSQLiteRepository } from '../../../src/database/repositories/bookRepository';
 import { LocalBook } from '../../../src/types';
 import { SERENE_LITHOS_TOKENS } from '../../../src/theme/tokens';
+import { useAuthStore } from '../../../src/state/useAuthStore';
 
 export default function OriginalPdfReaderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const db = useSQLiteContext();
-  const repo = new BookSQLiteRepository(db);
+  const user = useAuthStore((state) => state.user);
+  const repo = new BookSQLiteRepository(db, user?.id || '');
   const router = useRouter();
   const insets = useSafeAreaInsets();
 

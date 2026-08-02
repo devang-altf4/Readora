@@ -25,6 +25,9 @@ class BookProcessingError(BaseModel):
 class BookResponse(BaseModel):
     id: str = Field(alias="_id")
     schemaVersion: int = 1
+    userId: Optional[str] = None
+    catalogId: Optional[str] = None
+    isCatalog: bool = False
 
     originalFilename: str
     storedFilename: str

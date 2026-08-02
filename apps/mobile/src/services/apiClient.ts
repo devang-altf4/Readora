@@ -1,6 +1,16 @@
 import axios from 'axios';
 import { API_CONFIG } from '../constants/config';
 
+let authToken: string | null = null;
+
+export function setApiAuthToken(token: string | null): void {
+  authToken = token;
+}
+
+export function hasApiAuthToken(): boolean {
+  return Boolean(authToken);
+}
+
 export const apiClient = axios.create({
   timeout: API_CONFIG.timeoutMs,
   headers: {
@@ -10,6 +20,10 @@ export const apiClient = axios.create({
 
 apiClient.interceptors.request.use((config) => {
   config.baseURL = API_CONFIG.baseUrl;
+  if (authToken) {
+    config.headers = config.headers || {};
+    config.headers.Authorization = `Bearer ${authToken}`;
+  }
   return config;
 });
 

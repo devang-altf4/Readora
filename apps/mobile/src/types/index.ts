@@ -43,6 +43,9 @@ export interface LocalReaderSettings {
 
 export interface BackendBookResponse {
   _id: string;
+  userId?: string | null;
+  catalogId?: string | null;
+  isCatalog?: boolean;
   originalFilename: string;
   storedFilename: string;
   title?: string;
@@ -62,6 +65,7 @@ export interface BackendBookResponse {
     stage?: string;
   };
   storage: {
+    originalFileKey?: string;
     originalPdfKey?: string;
     coverKey?: string;
     processedJsonKey?: string;
