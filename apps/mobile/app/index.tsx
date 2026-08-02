@@ -21,6 +21,7 @@ import { LocalBook } from '../src/types';
 import { useLibraryStore } from '../src/state/useLibraryStore';
 import { useAppColors } from '../src/theme/useAppColors';
 import { useThemeStore } from '../src/state/useThemeStore';
+import { API_CONFIG } from '../src/constants/config';
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
@@ -61,7 +62,21 @@ export default function LibraryScreen() {
       const importedBook = await importPdfBook(repo);
       if (importedBook) {
         await loadBooks();
-        router.push(`/reader/smart/${importedBook.id}`);
+        if (importedBook.backendBookId) {
+          router.push(`/reader/smart/${importedBook.id}`);
+        } else {
+          Alert.alert(
+            'Smart Reader Unavailable',
+            `The PDF was saved locally, but the phone could not reach ${API_CONFIG.baseUrl}. You can read the original PDF now and retry Smart Reader later.`,
+            [
+              { text: 'Stay in Library', style: 'cancel' },
+              {
+                text: 'Open Original PDF',
+                onPress: () => router.push(`/reader/pdf/${importedBook.id}`),
+              },
+            ]
+          );
+        }
       }
     } catch (e: any) {
       Alert.alert('Import Failed', e.message || 'Could not import PDF.');

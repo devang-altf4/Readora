@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -18,12 +17,34 @@ import { BookSQLiteRepository } from '../../../src/database/repositories/bookRep
 import { LocalBook } from '../../../src/types';
 import { apiClient } from '../../../src/services/apiClient';
 import { getBookerlyFontFaceStyles } from '../../../src/utils/localFontLoader';
+import { uploadBookForSmartReading } from '../../../src/services/importService';
+import { API_CONFIG } from '../../../src/constants/config';
 
 const KINDLE_TYPOGRAPHY = {
   fontSize: 18,
   lineHeight: 1.285,
   horizontalMargin: 32,
 } as const;
+
+const SMART_READER_TIMEOUT_MS = 5 * 60 * 1000;
+
+const wait = (milliseconds: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+const getReaderErrorMessage = (error: unknown): string => {
+  const requestError = error as any;
+  const backendDetail = requestError?.response?.data?.detail;
+  if (typeof backendDetail === 'string' && backendDetail) {
+    return backendDetail;
+  }
+  if (requestError?.code === 'ECONNABORTED') {
+    return 'The reader service timed out.';
+  }
+  if (requestError?.message === 'Network Error') {
+    return `The phone could not reach ${API_CONFIG.baseUrl}. Check that the backend is running and both devices are on the same Wi-Fi.`;
+  }
+  return requestError?.message || 'Smart Reader content could not be loaded.';
+};
 
 export default function SmartReadingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -37,6 +58,9 @@ export default function SmartReadingScreen() {
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [controlsVisible, setControlsVisible] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Loading Reader...');
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   // Calibrated defaults matching the Kindle reference density and rhythm.
   const [theme, setTheme] = useState<'light' | 'sepia' | 'dark'>('dark');
@@ -55,11 +79,41 @@ export default function SmartReadingScreen() {
   const webViewRef = useRef<WebView>(null);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadSmartContent() {
-      if (!id) return;
+      if (!id) {
+        setLoadError('This book does not have a valid local ID.');
+        setLoading(false);
+        return;
+      }
+
+      let currentBook: LocalBook | null = null;
+
+      const loadCachedContent = async (candidate: LocalBook | null): Promise<boolean> => {
+        if (!candidate?.cachedSmartContentUri) return false;
+
+        const cachedFile = new File(candidate.cachedSmartContentUri);
+        if (!cachedFile.exists) return false;
+
+        const content = await cachedFile.text();
+        if (!content.trim()) return false;
+
+        if (!cancelled) {
+          setHtmlContent(content);
+          setBook(candidate);
+        }
+        return true;
+      };
+
       try {
+        setLoading(true);
+        setLoadError(null);
+        setLoadingMessage('Loading Reader...');
+
         // Load local font CSS declarations
         const fontData = await getBookerlyFontFaceStyles();
+        if (cancelled) return;
         setFontFaceCss(fontData.fontCss);
         setIsTrueBookerlyLoaded(fontData.isLoaded);
 
@@ -83,41 +137,108 @@ export default function SmartReadingScreen() {
         }
 
         const data = await repo.getBookById(id);
-        if (!data) return;
+        if (!data) {
+          throw new Error('This book is no longer available in the local library.');
+        }
+        currentBook = data;
         setBook(data);
 
-        // Fetch fresh HTML from backend if available, or fallback to local cache
-        if (data.backendBookId) {
-          try {
-            const response = await apiClient.get(`/books/${data.backendBookId}/content?format=html`);
-            const fetchedHtml = response.data;
-            setHtmlContent(fetchedHtml);
-
-            const booksDir = new Directory(Paths.document, 'books/');
-            if (!booksDir.exists) { booksDir.create(); }
-            const cacheFile = new File(booksDir, `cache_${data.id}.html`);
-            cacheFile.write(fetchedHtml);
-            await repo.updateBackendStatus(data.id, data.backendBookId, data.backendProcessingStatus, 100, true);
-          } catch (fetchErr) {
-            if (data.cachedSmartContentUri) {
-              const cachedFile = new File(data.cachedSmartContentUri);
-              const content = await cachedFile.text();
-              setHtmlContent(content);
-            }
-          }
-        } else if (data.cachedSmartContentUri) {
-          const cachedFile = new File(data.cachedSmartContentUri);
-          const content = await cachedFile.text();
-          setHtmlContent(content);
+        // Repair books imported by older builds that opened the reader before
+        // their background upload returned a backend ID.
+        if (!currentBook.backendBookId) {
+          setLoadingMessage('Connecting to Smart Reader...');
+          currentBook = await uploadBookForSmartReading(repo, currentBook);
+          if (cancelled) return;
+          setBook(currentBook);
         }
-      } catch (e: any) {
-        Alert.alert('Content Error', 'Could not load Smart Reading content.');
+
+        const backendBookId = currentBook.backendBookId;
+        if (!backendBookId) {
+          throw new Error('The backend did not return a Smart Reader book ID.');
+        }
+
+        const deadline = Date.now() + SMART_READER_TIMEOUT_MS;
+        let contentReady = false;
+
+        while (!cancelled && !contentReady) {
+          const statusResponse = await apiClient.get(`/books/${backendBookId}`, { timeout: 10000 });
+          const backendBook = statusResponse.data;
+          const status = backendBook.processingStatus || 'processing';
+          const progress = backendBook.processingProgress ?? 0;
+          const stage = backendBook.processingStage || 'preparing_content';
+
+          await repo.updateBackendStatus(
+            currentBook.id,
+            backendBookId,
+            status,
+            progress,
+            status === 'ready' || status === 'ocr_required'
+          );
+
+          currentBook = {
+            ...currentBook,
+            backendProcessingStatus: status,
+            backendProcessingProgress: progress,
+            smartModeAvailable: status === 'ready' || status === 'ocr_required',
+          };
+
+          if (!cancelled) {
+            setBook(currentBook);
+            setLoadingMessage(`Preparing Reader... ${progress}% (${stage.replace(/_/g, ' ')})`);
+          }
+
+          if (status === 'ready' || status === 'ocr_required') {
+            contentReady = true;
+            break;
+          }
+          if (status === 'failed') {
+            throw new Error(backendBook.processingError?.message || 'The backend could not process this PDF.');
+          }
+          if (Date.now() >= deadline) {
+            throw new Error('Smart Reader processing took longer than five minutes. Please retry.');
+          }
+
+          await wait(1200);
+        }
+
+        if (cancelled) return;
+
+        setLoadingMessage('Opening Reader...');
+        const response = await apiClient.get(`/books/${backendBookId}/content?format=html`, { timeout: 30000 });
+        const fetchedHtml = response.data;
+        if (typeof fetchedHtml !== 'string' || !fetchedHtml.trim()) {
+          throw new Error('The backend returned empty Smart Reader content.');
+        }
+
+        const booksDir = new Directory(Paths.document, 'books/');
+        if (!booksDir.exists) { booksDir.create(); }
+        const cacheFile = new File(booksDir, `cache_${currentBook.id}.html`);
+        cacheFile.write(fetchedHtml);
+        await repo.updateSmartContentCache(currentBook.id, cacheFile.uri);
+
+        if (!cancelled) {
+          setHtmlContent(fetchedHtml);
+        }
+      } catch (error) {
+        if (cancelled) return;
+
+        try {
+          if (await loadCachedContent(currentBook)) return;
+        } catch (cacheError) {
+          console.warn('Could not read cached Smart Reader content:', cacheError);
+        }
+
+        setLoadError(getReaderErrorMessage(error));
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
+
     loadSmartContent();
-  }, [id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [id, reloadKey]);
 
   const postWebViewMessage = (msgObj: object) => {
     if (webViewRef.current) {
@@ -325,11 +446,42 @@ export default function SmartReadingScreen() {
     [preparedHtmlContent]
   );
 
-  if (loading || !book || !htmlContent) {
+  if (loading) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top, backgroundColor: bgColors[theme] }]}>
         <ActivityIndicator size="large" color={textColors[theme]} />
-        <Text style={[styles.loadingText, { color: subTextColors[theme] }]}>Loading Reader...</Text>
+        <Text style={[styles.loadingText, { color: subTextColors[theme] }]}>{loadingMessage}</Text>
+      </View>
+    );
+  }
+
+  if (!book || loadError || !htmlContent) {
+    return (
+      <View style={[styles.centered, styles.errorContainer, { paddingTop: insets.top, backgroundColor: bgColors[theme] }]}>
+        <Text style={[styles.errorTitle, { color: textColors[theme] }]}>Smart Reader Unavailable</Text>
+        <Text style={[styles.errorMessage, { color: subTextColors[theme] }]}>
+          {loadError || 'No Smart Reader content is available for this book.'}
+        </Text>
+        <Text style={[styles.apiAddressText, { color: subTextColors[theme] }]}>{API_CONFIG.baseUrl}</Text>
+        <View style={styles.errorActions}>
+          <TouchableOpacity
+            style={styles.primaryErrorButton}
+            onPress={() => setReloadKey((value) => value + 1)}
+          >
+            <Text style={styles.primaryErrorButtonText}>Retry Smart Reader</Text>
+          </TouchableOpacity>
+          {book && (
+            <TouchableOpacity
+              style={[styles.secondaryErrorButton, { borderColor: subTextColors[theme] }]}
+              onPress={() => router.replace(`/reader/pdf/${book.id}`)}
+            >
+              <Text style={[styles.secondaryErrorButtonText, { color: textColors[theme] }]}>Open Original PDF</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => router.replace('/')}>
+            <Text style={[styles.libraryLink, { color: subTextColors[theme] }]}>Back to Library</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
@@ -619,6 +771,63 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 32,
+  },
+  errorContainer: {
+    paddingHorizontal: 28,
+  },
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+  apiAddressText: {
+    fontSize: 12,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+  errorActions: {
+    width: '100%',
+    maxWidth: 320,
+    marginTop: 24,
+    gap: 12,
+  },
+  primaryErrorButton: {
+    minHeight: 46,
+    borderRadius: 8,
+    backgroundColor: '#3B82F6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  primaryErrorButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  secondaryErrorButton: {
+    minHeight: 46,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  secondaryErrorButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  libraryLink: {
+    fontSize: 14,
+    textAlign: 'center',
+    paddingVertical: 8,
   },
   topHeader: {
     position: 'absolute',

@@ -77,6 +77,14 @@ export class BookSQLiteRepository {
     );
   }
 
+  async updateSmartContentCache(id: string, cachedSmartContentUri: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db.runAsync(
+      `UPDATE books SET cachedSmartContentUri = ?, smartModeAvailable = 1, updatedAt = ? WHERE id = ?`,
+      [cachedSmartContentUri, now, id]
+    );
+  }
+
   async deleteBook(id: string): Promise<void> {
     await this.db.runAsync('DELETE FROM books WHERE id = ?', [id]);
   }

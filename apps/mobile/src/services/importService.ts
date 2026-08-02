@@ -4,6 +4,48 @@ import { LocalBook } from '../types';
 import { BookSQLiteRepository } from '../database/repositories/bookRepository';
 import { apiClient } from './apiClient';
 
+export async function uploadBookForSmartReading(
+  repo: BookSQLiteRepository,
+  book: LocalBook
+): Promise<LocalBook> {
+  const formData = new FormData();
+  formData.append('file', {
+    uri: book.localFileUri,
+    name: book.originalFileName,
+    type: 'application/pdf',
+  } as any);
+
+  const response = await apiClient.post('/books/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000,
+  });
+
+  const backendBook = response.data;
+  if (!backendBook?._id) {
+    throw new Error('The reader service returned an invalid upload response.');
+  }
+
+  const status = backendBook.processingStatus || 'uploaded';
+  const progress = backendBook.processingProgress ?? 0;
+  const smartModeAvailable = status === 'ready' || status === 'ocr_required';
+
+  await repo.updateBackendStatus(
+    book.id,
+    backendBook._id,
+    status,
+    progress,
+    smartModeAvailable
+  );
+
+  return {
+    ...book,
+    backendBookId: backendBook._id,
+    backendProcessingStatus: status,
+    backendProcessingProgress: progress,
+    smartModeAvailable,
+  };
+}
+
 export async function importPdfBook(repo: BookSQLiteRepository): Promise<LocalBook | null> {
   const result = await DocumentPicker.getDocumentAsync({
     type: 'application/pdf',
@@ -53,36 +95,13 @@ export async function importPdfBook(repo: BookSQLiteRepository): Promise<LocalBo
 
   await repo.insertBook(newBook);
 
-  // Background auto-trigger processing with backend
-  (async () => {
-    try {
-      const formData = new FormData();
-      formData.append('file', {
-        uri: destinationFile.uri,
-        name: file.name,
-        type: 'application/pdf',
-      } as any);
-
-      const res = await apiClient.post('/books/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 10000,
-      });
-
-      const backendData = res.data;
-      if (backendData && backendData._id) {
-        await repo.updateBackendStatus(
-          bookId,
-          backendData._id,
-          backendData.processingStatus || 'uploaded',
-          backendData.processingProgress || 10,
-          backendData.processingStatus === 'ready'
-        );
-      }
-    } catch (e) {
-      // Backend not running or offline, book remains available for offline PDF reading
-      console.log('Background smart mode processing auto-trigger skipped (offline).');
-    }
-  })();
-
-  return newBook;
+  try {
+    // Wait for the upload ID before opening Smart Reader. Processing itself
+    // remains asynchronous on the backend and is polled by the reader screen.
+    return await uploadBookForSmartReading(repo, newBook);
+  } catch (error) {
+    // The local PDF is preserved and can still be opened in Original mode.
+    console.warn('Smart Reader upload unavailable:', error);
+    return newBook;
+  }
 }
