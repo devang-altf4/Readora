@@ -1,8 +1,10 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any
+from typing import Optional
 from datetime import datetime
 
 class StorageReferences(BaseModel):
+    originalFileKey: Optional[str] = None
+    # Kept for compatibility with books imported before multi-format support.
     originalPdfKey: Optional[str] = None
     coverKey: Optional[str] = None
     processedJsonKey: Optional[str] = None

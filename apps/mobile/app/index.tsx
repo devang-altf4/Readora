@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   FlatList,
   ScrollView,
-  Image,
   ActivityIndicator,
   Alert,
 } from 'react-native';
@@ -16,12 +15,12 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { BookSQLiteRepository } from '../src/database/repositories/bookRepository';
-import { importPdfBook } from '../src/services/importService';
+import { getBookExtension, importBook } from '../src/services/importService';
 import { LocalBook } from '../src/types';
 import { useLibraryStore } from '../src/state/useLibraryStore';
 import { useAppColors } from '../src/theme/useAppColors';
 import { useThemeStore } from '../src/state/useThemeStore';
-import { API_CONFIG } from '../src/constants/config';
+import { BookCoverCard } from '../src/components/BookCoverCard';
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
@@ -45,6 +44,31 @@ export default function LibraryScreen() {
       setLoading(true);
       const data = await repo.getAllBooks(sortBy, 'DESC');
       setBooks(data);
+
+      // Resolve missing covers from backend (covers are generated asynchronously)
+      const { apiClient } = require('../src/services/apiClient');
+      const { API_CONFIG } = require('../src/constants/config');
+      const booksNeedingCover = data.filter((b: LocalBook) => !b.coverUri && b.backendBookId);
+      if (booksNeedingCover.length > 0) {
+        let anyUpdated = false;
+        for (const b of booksNeedingCover) {
+          try {
+            await apiClient.get(`/books/${b.backendBookId}/cover`, {
+              responseType: 'arraybuffer',
+              timeout: 3000,
+            });
+            const coverUrl = `${API_CONFIG.baseUrl}/books/${b.backendBookId}/cover`;
+            await repo.updateCoverUri(b.id, coverUrl);
+            anyUpdated = true;
+          } catch {
+            // Cover not ready yet or not available
+          }
+        }
+        if (anyUpdated) {
+          const refreshed = await repo.getAllBooks(sortBy, 'DESC');
+          setBooks(refreshed);
+        }
+      }
     } catch (e) {
       console.error('Error loading books:', e);
     } finally {
@@ -59,27 +83,14 @@ export default function LibraryScreen() {
   const handleImport = async () => {
     try {
       setImporting(true);
-      const importedBook = await importPdfBook(repo);
+      const importedBook = await importBook(repo);
       if (importedBook) {
         await loadBooks();
-        if (importedBook.backendBookId) {
-          router.push(`/reader/smart/${importedBook.id}`);
-        } else {
-          Alert.alert(
-            'Smart Reader Unavailable',
-            `The PDF was saved locally, but the phone could not reach ${API_CONFIG.baseUrl}. You can read the original PDF now and retry Smart Reader later.`,
-            [
-              { text: 'Stay in Library', style: 'cancel' },
-              {
-                text: 'Open Original PDF',
-                onPress: () => router.push(`/reader/pdf/${importedBook.id}`),
-              },
-            ]
-          );
-        }
+        const isOfflinePdf = getBookExtension(importedBook.originalFileName) === 'pdf' && !importedBook.backendBookId;
+        router.push(isOfflinePdf ? `/reader/pdf/${importedBook.id}` : `/reader/smart/${importedBook.id}`);
       }
     } catch (e: any) {
-      Alert.alert('Import Failed', e.message || 'Could not import PDF.');
+      Alert.alert('Import Failed', e.message || 'Could not import this book.');
     } finally {
       setImporting(false);
     }
@@ -101,31 +112,20 @@ export default function LibraryScreen() {
           { backgroundColor: colors.cardBg, borderColor: colors.divider }
         ]}
         activeOpacity={0.8}
-        onPress={() => router.push(`/reader/smart/${item.id}`)}
+        onPress={() => {
+          const isOfflinePdf = getBookExtension(item.originalFileName) === 'pdf' && !item.backendBookId;
+          router.push(isOfflinePdf ? `/reader/pdf/${item.id}` : `/reader/smart/${item.id}`);
+        }}
       >
-        <View style={[styles.coverPlaceholder, { backgroundColor: colors.isDark ? '#2C2C2E' : '#EAE8E2' }]}>
-          {item.coverUri ? (
-            <Image source={{ uri: item.coverUri }} style={styles.coverImage} />
-          ) : (
-            <View style={styles.kindleDefaultCover}>
-              <Text style={[styles.coverInitials, { color: colors.textPrimary }]}>
-                {item.title.substring(0, 2).toUpperCase()}
-              </Text>
-            </View>
-          )}
-
-          {/* Kindle Badges */}
-          {progressPct > 0 && (
-            <View style={styles.badgeContainer}>
-              <Text style={styles.badgeText}>{progressPct}%</Text>
-            </View>
-          )}
-          {isNew && (
-            <View style={styles.newBadgeContainer}>
-              <Text style={styles.newBadgeText}>NEW</Text>
-            </View>
-          )}
-        </View>
+        <BookCoverCard
+          title={item.title}
+          author={item.author}
+          coverUri={item.coverUri}
+          height={viewMode === 'grid' ? 190 : 130}
+          width={viewMode === 'grid' ? '100%' : 95}
+          progressPct={progressPct}
+          isNew={isNew}
+        />
 
         <View style={styles.bookInfo}>
           <View style={styles.bookHeaderRow}>
@@ -136,8 +136,9 @@ export default function LibraryScreen() {
               <Text style={[styles.threeDots, { color: colors.textSecondary }]}>⋮</Text>
             </TouchableOpacity>
           </View>
+
           <Text style={[styles.bookAuthor, { color: colors.textSecondary }]} numberOfLines={1}>
-            {item.author || 'Kindle Book'}
+            {item.author || 'Readora Book'}
           </Text>
 
           <View style={styles.progressContainer}>
@@ -154,13 +155,13 @@ export default function LibraryScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.bg }]}>
       <StatusBar style={colors.isDark ? 'light' : 'dark'} backgroundColor={colors.bg} />
 
-      {/* Official Amazon Kindle Top Search Bar Row */}
+      {/* Official Readora Top Search Bar Row */}
       <View style={styles.kindleHeaderRow}>
         <View style={[styles.kindleSearchPill, { backgroundColor: colors.searchBg, borderColor: colors.searchBorder }]}>
           <Text style={styles.searchIconText}>🔍</Text>
           <TextInput
             style={[styles.kindleSearchInput, { color: colors.textPrimary }]}
-            placeholder="Search Kindle"
+            placeholder="Search Readora"
             placeholderTextColor={colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -179,7 +180,7 @@ export default function LibraryScreen() {
       {/* Primary Categories Scroll Bar */}
       <View style={styles.categoryScrollContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScrollContent}>
-          {['Explore', 'All', 'Kindle Unlimited', 'Prime Reading'].map((cat) => {
+          {['Explore', 'All', 'Readora Unlimited', 'Prime Reading'].map((cat) => {
             const isActive = activeCategory === cat;
             return (
               <TouchableOpacity
@@ -212,32 +213,57 @@ export default function LibraryScreen() {
             <Text style={[styles.settingLabel, { color: colors.textPrimary }]}>Theme Mode</Text>
             <View style={styles.themeOptionsRow}>
               <TouchableOpacity
-                style={[styles.themeOptionBtn, colors.isDark && styles.activeThemeBtn]}
+                style={[
+                  styles.themeOptionBtn,
+                  {
+                    backgroundColor: colors.isDark ? '#3B82F6' : '#EAE7DC',
+                    borderColor: colors.isDark ? '#3B82F6' : '#D8D3C4',
+                  },
+                  colors.isDark && styles.activeThemeBtn
+                ]}
                 onPress={() => setThemeMode('dark')}
               >
-                <Text style={[styles.themeOptionText, { color: colors.isDark ? '#FFFFFF' : colors.textPrimary }]}>Dark Mode (E-Ink)</Text>
+                <Text style={[
+                  styles.themeOptionText,
+                  { color: colors.isDark ? '#FFFFFF' : '#171717' }
+                ]}>
+                  Dark Mode (E-Ink)
+                </Text>
               </TouchableOpacity>
+
               <TouchableOpacity
-                style={[styles.themeOptionBtn, !colors.isDark && styles.activeThemeBtn]}
+                style={[
+                  styles.themeOptionBtn,
+                  {
+                    backgroundColor: !colors.isDark ? '#171717' : '#1C1C1E',
+                    borderColor: !colors.isDark ? '#171717' : '#2C2C2E',
+                  },
+                  !colors.isDark && styles.activeThemeBtn
+                ]}
                 onPress={() => setThemeMode('light')}
               >
-                <Text style={[styles.themeOptionText, { color: !colors.isDark ? '#FFFFFF' : colors.textPrimary }]}>Light Mode (Paperwhite Vellum)</Text>
+                <Text style={[
+                  styles.themeOptionText,
+                  { color: !colors.isDark ? '#FFFFFF' : '#A1A1A6' }
+                ]}>
+                  Light Mode (Paperwhite Vellum)
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </ScrollView>
       ) : (
         <ScrollView style={styles.mainScrollView} contentContainerStyle={styles.mainScrollContent}>
-          {/* Welcome to Dindle Kindle Greeting Banner */}
+          {/* Welcome to Readora Greeting Banner */}
           <View style={[styles.welcomeCard, { backgroundColor: colors.welcomeBannerBg }]}>
             <Text style={[styles.accentDecoration, { color: colors.isDark ? '#3B82F6' : '#5F635F' }]}>
               ▼  ▲  ▼  ▲  ▼  ▲  ▼
             </Text>
             <Text style={[styles.welcomeTitle, { color: colors.welcomeBannerText }]}>
-              Welcome to Dindle
+              Welcome to Readora
             </Text>
             <Text style={[styles.welcomeSubtitle, { color: colors.welcomeBannerSubtext }]}>
-              Discover a quiet reading experience in reflowable Kindle Smart Mode.
+              Discover a quiet reading experience in reflowable Readora Smart Mode.
             </Text>
           </View>
 
@@ -282,7 +308,7 @@ export default function LibraryScreen() {
                   <ActivityIndicator size="small" color={colors.textPrimary} />
                 ) : (
                   <Text style={[styles.importPillText, { color: colors.isDark ? '#3B82F6' : colors.textPrimary }]}>
-                    + Import PDF
+                    + Import Book
                   </Text>
                 )}
               </TouchableOpacity>
@@ -305,10 +331,10 @@ export default function LibraryScreen() {
             <View style={styles.emptyStateContainer}>
               <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>No Books Found</Text>
               <Text style={[styles.emptyStateSubtitle, { color: colors.textSecondary }]}>
-                Import a PDF book to start reading in Kindle Smart Mode.
+                Import PDF, EPUB, Kindle, HTML, TXT, or DOCX books to start reading.
               </Text>
               <TouchableOpacity style={styles.emptyImportBtn} onPress={handleImport}>
-                <Text style={styles.emptyImportBtnText}>📖 Import PDF Book</Text>
+                <Text style={styles.emptyImportBtnText}>📖 Import Book</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -325,7 +351,7 @@ export default function LibraryScreen() {
         </ScrollView>
       )}
 
-      {/* Official Amazon Kindle Bottom Tab Navigation Bar */}
+      {/* Official Readora Bottom Tab Navigation Bar */}
       <View style={[styles.bottomTabBar, { backgroundColor: colors.bottomBarBg, borderColor: colors.divider }]}>
         <TouchableOpacity
           style={styles.tabItem}
@@ -515,56 +541,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
   },
-  coverPlaceholder: {
-    height: 180,
-    width: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  coverImage: {
-    width: '100%',
-    height: '100%',
-  },
-  kindleDefaultCover: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  coverInitials: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    fontFamily: 'Playfair Display',
-  },
-  badgeContainer: {
-    position: 'absolute',
-    bottom: 8,
-    right: 8,
-    backgroundColor: 'rgba(0,0,0,0.75)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  badgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  newBadgeContainer: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: '#3B82F6',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  newBadgeText: {
-    color: '#FFFFFF',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
   bookInfo: {
+    flex: 1,
     padding: 12,
+    justifyContent: 'space-between',
   },
   bookHeaderRow: {
     flexDirection: 'row',
@@ -652,12 +632,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
-    backgroundColor: '#2C2C2E',
     alignItems: 'center',
+    borderWidth: 1,
   },
   activeThemeBtn: {
     borderWidth: 2,
-    borderColor: '#3B82F6',
   },
   themeOptionText: {
     fontSize: 14,

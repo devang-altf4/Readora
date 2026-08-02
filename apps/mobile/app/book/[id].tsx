@@ -17,6 +17,7 @@ import { BookSQLiteRepository } from '../../src/database/repositories/bookReposi
 import { LocalBook } from '../../src/types';
 import { apiClient } from '../../src/services/apiClient';
 import { useAppColors } from '../../src/theme/useAppColors';
+import { getBookExtension, getBookMimeType } from '../../src/services/importService';
 
 export default function BookDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,8 +84,8 @@ export default function BookDetailsScreen() {
 
   const handleOpenBook = async () => {
     if (!book) return;
-    // Default reading mode is ALWAYS Smart Mode
-    router.push(`/reader/smart/${book.id}`);
+    const isOfflinePdf = getBookExtension(book.originalFileName) === 'pdf' && !book.backendBookId;
+    router.push(isOfflinePdf ? `/reader/pdf/${book.id}` : `/reader/smart/${book.id}`);
 
     // If backend processing has not started yet, trigger in background automatically
     if (!book.smartModeAvailable && !book.backendBookId) {
@@ -94,12 +95,11 @@ export default function BookDetailsScreen() {
         formData.append('file', {
           uri: book.localFileUri,
           name: book.originalFileName,
-          type: 'application/pdf',
+          type: getBookMimeType(book.originalFileName),
         } as any);
 
-        const response = await apiClient.post('/books/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
+        // Axios must generate the multipart boundary on Android/Expo Go.
+        const response = await apiClient.post('/books/upload', formData);
 
         const backendBook = response.data;
         await repo.updateBackendStatus(

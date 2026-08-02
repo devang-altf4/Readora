@@ -6,6 +6,7 @@ from app.storage.base import AbstractStorageService
 from app.processing.processing_pipeline import pipeline
 from app.core.logging import logger
 import uuid
+from app.processing.book_formats import get_book_extension
 
 class BookService:
     def __init__(self, repository: BookRepository, storage: AbstractStorageService):
@@ -22,11 +23,12 @@ class BookService:
             return existing
 
         book_id = str(uuid.uuid4())
-        stored_filename = f"{book_id}.pdf"
+        extension = get_book_extension(original_filename)
+        stored_filename = f"{book_id}{extension}"
         file_size = len(file_bytes)
 
         # Save file to storage
-        original_key = await self.storage.save_original(book_id, file_bytes)
+        original_key = await self.storage.save_original(book_id, file_bytes, extension=extension)
 
         # Create MongoDB document
         book_doc = {
@@ -47,7 +49,8 @@ class BookService:
             "processingStage": "awaiting_processing",
             "processingError": None,
             "storage": {
-                "originalPdfKey": original_key,
+                "originalFileKey": original_key,
+                "originalPdfKey": original_key if extension == ".pdf" else None,
                 "coverKey": None,
                 "processedJsonKey": None,
                 "processedHtmlKey": None
@@ -66,29 +69,39 @@ class BookService:
             # Trigger background processing
             asyncio.create_task(self.process_book(book_id))
             return created_doc
-        except Exception as e:
+        except Exception:
             # Compensation logic if MongoDB insert fails
             await self.storage.delete_file(original_key)
-            raise e
+            raise
 
     async def process_book(self, book_id: str) -> Dict[str, Any]:
         book = await self.repo.get_book_by_id(book_id)
         if not book:
             raise ValueError(f"Book {book_id} not found")
 
-        await self.repo.update_processing_state(book_id, "processing", "opening_pdf", progress=10)
+        await self.repo.update_processing_state(book_id, "processing", "opening_file", progress=10)
 
-        original_key = book["storage"]["originalPdfKey"]
+        storage_info = book.get("storage", {})
+        original_key = storage_info.get("originalFileKey") or storage_info.get("originalPdfKey")
+        extension = get_book_extension(book.get("originalFilename", ""))
         try:
-            pdf_bytes = await self.storage.get_file_bytes(original_key)
-        except Exception as e:
-            error_data = {"code": "FILE_NOT_FOUND", "message": "Original PDF file missing from storage.", "stage": "opening_pdf"}
-            return await self.repo.update_processing_state(book_id, "failed", "opening_pdf", progress=0, error=error_data)
+            if not original_key:
+                raise FileNotFoundError("Original file storage key is missing.")
+            file_bytes = await self.storage.get_file_bytes(original_key)
+        except Exception:
+            error_data = {"code": "FILE_NOT_FOUND", "message": "Original book file is missing from storage.", "stage": "opening_file"}
+            return await self.repo.update_processing_state(book_id, "failed", "opening_file", progress=0, error=error_data)
 
         await self.repo.update_processing_state(book_id, "processing", "extracting_text", progress=40)
 
-        # Run CPU heavy PDF parsing in threadpool
-        res = await asyncio.to_thread(pipeline.process_pdf, pdf_bytes, book_id)
+        # Run CPU-heavy parsing/unpacking in a threadpool.
+        res = await asyncio.to_thread(
+            pipeline.process_file,
+            file_bytes,
+            book_id,
+            extension,
+            book.get("originalFilename", ""),
+        )
 
         if not res["success"]:
             return await self.repo.update_processing_state(book_id, "failed", res["error"]["stage"], progress=0, error=res["error"])
@@ -118,7 +131,8 @@ class BookService:
             "processingStage": "complete",
             "processingProgress": 100,
             "storage": {
-                "originalPdfKey": original_key,
+                "originalFileKey": original_key,
+                "originalPdfKey": original_key if extension == ".pdf" else None,
                 "coverKey": cover_key,
                 "processedJsonKey": json_key,
                 "processedHtmlKey": html_key

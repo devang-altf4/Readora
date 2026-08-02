@@ -2,10 +2,94 @@ import fitz  # PyMuPDF
 import json
 import html
 import io
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple
 from PIL import Image
+from app.processing.book_extractors import (
+    BookExtractionError,
+    extract_docx,
+    extract_epub,
+    extract_html,
+    extract_txt,
+    unpack_kindle,
+)
 
 class ProcessingPipeline:
+    def process_file(
+        self,
+        file_bytes: bytes,
+        book_id: str,
+        extension: str,
+        original_filename: str = "",
+    ) -> Dict[str, Any]:
+        extension = extension.lower()
+        if extension == ".pdf":
+            return self.process_pdf(file_bytes, book_id)
+
+        try:
+            if extension in {".mobi", ".azw", ".azw3"}:
+                unpacked_bytes, unpacked_extension, unpacked_name = unpack_kindle(file_bytes, extension)
+                return self.process_file(unpacked_bytes, book_id, unpacked_extension, unpacked_name)
+            if extension in {".epub", ".kepub"}:
+                source = extract_epub(file_bytes)
+            elif extension in {".html", ".htm"}:
+                source = extract_html(file_bytes)
+            elif extension == ".txt":
+                source = extract_txt(file_bytes)
+            elif extension == ".docx":
+                source = extract_docx(file_bytes)
+            else:
+                raise BookExtractionError(
+                    "UNSUPPORTED_FORMAT",
+                    f"Unsupported book format: {extension or 'unknown'}.",
+                    "opening_file",
+                )
+        except BookExtractionError as exc:
+            return {
+                "success": False,
+                "error": {"code": exc.code, "message": exc.message, "stage": exc.stage},
+            }
+
+        blocks = source["blocks"]
+        text_blocks = [block for block in blocks if block.get("type") in {"heading", "paragraph"}]
+        total_chars = sum(len(block.get("text", "")) for block in text_blocks)
+        total_words = sum(len(block.get("text", "").split()) for block in text_blocks)
+        heading_count = sum(1 for block in blocks if block.get("type") == "heading")
+        title = source.get("title", "").strip()
+        author = source.get("author", "").strip()
+        fallback_title = original_filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").strip()
+        display_title = title or fallback_title or f"Book {book_id}"
+        html_content = self._generate_safe_html(display_title, blocks)
+
+        stats = {
+            "characterCount": total_chars,
+            "wordCount": total_words,
+            "headingCount": heading_count,
+            "imageCount": 1 if source.get("coverBytes") else 0,
+        }
+        json_data = {
+            "bookId": book_id,
+            "title": title,
+            "author": author,
+            "pageCount": source["pageCount"],
+            "documentType": "text_based",
+            "sourceFormat": extension.lstrip("."),
+            "stats": stats,
+            "blocks": blocks,
+        }
+
+        return {
+            "success": True,
+            "title": title,
+            "author": author,
+            "pageCount": source["pageCount"],
+            "textPageCount": source["textPageCount"],
+            "documentType": "text_based",
+            "coverBytes": source.get("coverBytes"),
+            "htmlContent": html_content,
+            "jsonContent": json.dumps(json_data, ensure_ascii=False, indent=2),
+            "stats": stats,
+        }
+
     def process_pdf(self, pdf_bytes: bytes, book_id: str) -> Dict[str, Any]:
         try:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")

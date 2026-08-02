@@ -85,6 +85,14 @@ export class BookSQLiteRepository {
     );
   }
 
+  async updateCoverUri(id: string, coverUri: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db.runAsync(
+      `UPDATE books SET coverUri = ?, updatedAt = ? WHERE id = ?`,
+      [coverUri, now, id]
+    );
+  }
+
   async deleteBook(id: string): Promise<void> {
     await this.db.runAsync('DELETE FROM books WHERE id = ?', [id]);
   }

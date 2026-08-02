@@ -4,7 +4,10 @@ from app.main import app
 from httpx import AsyncClient, ASGITransport
 
 @pytest_asyncio.fixture(autouse=True)
-async def initialize_test_database():
+async def initialize_test_database(request):
+    if "client" not in request.fixturenames:
+        yield
+        return
     await connect_to_mongo()
     yield
     await close_mongo_connection()

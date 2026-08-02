@@ -1,12 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import BinaryIO, Optional
 
 
 class AbstractStorageService(ABC):
 
     @abstractmethod
     async def save_original(self, book_id: str, file_data: bytes, extension: str = ".pdf") -> str:
-        """Saves original PDF file and returns relative storage key."""
+        """Saves the original book file and returns its relative storage key."""
         pass
 
     @abstractmethod

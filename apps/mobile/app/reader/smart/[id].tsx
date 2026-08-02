@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -38,6 +37,8 @@ export default function SmartReadingScreen() {
 
   const [book, setBook] = useState<LocalBook | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [controlsVisible, setControlsVisible] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
@@ -62,6 +63,8 @@ export default function SmartReadingScreen() {
     async function loadSmartContent() {
       if (!id) return;
       try {
+        setLoading(true);
+        setLoadError(null);
         // Embed bundled Baskerville font data before constructing WebView HTML.
         const fontData = await getReaderFontFaceStyles();
         setFontFaceCss(fontData.fontCss);
@@ -109,20 +112,65 @@ export default function SmartReadingScreen() {
         // Fetch fresh HTML from backend if available, or fallback to local cache
         if (data.backendBookId) {
           try {
-            const response = await apiClient.get(`/books/${data.backendBookId}/content?format=html`);
-            const fetchedHtml = response.data;
+            let fetchedHtml = '';
+            for (let attempt = 0; attempt < 120; attempt += 1) {
+              const statusResponse = await apiClient.get(`/books/${data.backendBookId}`);
+              const backendBook = statusResponse.data;
+              const processingStatus = backendBook.processingStatus || 'processing';
+              const processingProgress = backendBook.processingProgress ?? 0;
+
+              await repo.updateBackendStatus(
+                data.id,
+                data.backendBookId,
+                processingStatus,
+                processingProgress,
+                processingStatus === 'ready' || processingStatus === 'ocr_required'
+              );
+
+              if (processingStatus === 'failed') {
+                throw new Error(backendBook.processingError?.message || 'The book could not be processed.');
+              }
+              if (processingStatus === 'ready' || processingStatus === 'ocr_required') {
+                const response = await apiClient.get(`/books/${data.backendBookId}/content?format=html`);
+                fetchedHtml = response.data;
+                break;
+              }
+
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+            }
+
+            if (!fetchedHtml) {
+              throw new Error('Book processing is taking too long. Please try again.');
+            }
             setHtmlContent(fetchedHtml);
 
             const booksDir = new Directory(Paths.document, 'books/');
             if (!booksDir.exists) { booksDir.create(); }
             const cacheFile = new File(booksDir, `cache_${data.id}.html`);
             cacheFile.write(fetchedHtml);
-            await repo.updateBackendStatus(data.id, data.backendBookId, data.backendProcessingStatus, 100, true);
+            await repo.updateSmartContentCache(data.id, cacheFile.uri);
+
+            // Persist the real cover URL once processing is complete
+            if (!data.coverUri && data.backendBookId) {
+              try {
+                const { API_CONFIG } = require('../../../src/constants/config');
+                const coverUrl = `${API_CONFIG.baseUrl}/books/${data.backendBookId}/cover`;
+                await apiClient.get(`/books/${data.backendBookId}/cover`, {
+                  responseType: 'arraybuffer',
+                  timeout: 5000,
+                });
+                await repo.updateCoverUri(data.id, coverUrl);
+              } catch {
+                // Cover not available — generated hardcover card will be used
+              }
+            }
           } catch (fetchErr) {
             if (data.cachedSmartContentUri) {
               const cachedFile = new File(data.cachedSmartContentUri);
               const content = await cachedFile.text();
               setHtmlContent(content);
+            } else {
+              throw fetchErr;
             }
           }
         } else if (data.cachedSmartContentUri) {
@@ -131,13 +179,13 @@ export default function SmartReadingScreen() {
           setHtmlContent(content);
         }
       } catch (e: any) {
-        Alert.alert('Content Error', 'Could not load Smart Reading content.');
+        setLoadError(e?.message || 'Could not load Smart Reading content.');
       } finally {
         setLoading(false);
       }
     }
     loadSmartContent();
-  }, [id]);
+  }, [id, retryToken]);
 
   const postWebViewMessage = (msgObj: object) => {
     if (webViewRef.current) {
@@ -376,6 +424,23 @@ export default function SmartReadingScreen() {
     () => ({ html: preparedHtmlContent }),
     [preparedHtmlContent]
   );
+
+  if (loadError && !htmlContent) {
+    return (
+      <View style={[styles.centered, { paddingTop: insets.top, backgroundColor: bgColors[theme] }]}>
+        <Text style={[styles.loadingText, { color: textColors[theme], textAlign: 'center' }]}>{loadError}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={() => setRetryToken((value) => value + 1)}
+        >
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Text style={[styles.backLinkText, { color: subTextColors[theme] }]}>Back to Library</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (loading || !book || !htmlContent) {
     return (
@@ -680,6 +745,24 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
+    paddingHorizontal: 28,
+  },
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#3B82F6',
+    borderRadius: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 11,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  backLinkText: {
+    marginTop: 18,
+    fontSize: 13,
+    fontWeight: '600',
   },
   topHeader: {
     position: 'absolute',

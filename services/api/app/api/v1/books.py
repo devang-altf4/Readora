@@ -1,36 +1,49 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, Response, BackgroundTasks
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, status, BackgroundTasks
 from fastapi.responses import HTMLResponse, Response
-from typing import List, Optional
+from typing import List
 from app.services.book_service import BookService
 from app.api.dependencies import get_book_service
 from app.schemas.book import BookResponse
-from app.schemas.common import ResponseModel
 from app.storage.local_storage import storage_service
+from app.processing.book_formats import (
+    SUPPORTED_BOOK_EXTENSIONS,
+    SUPPORTED_FORMAT_LABEL,
+    get_book_extension,
+    get_book_mime_type,
+)
 
 router = APIRouter(prefix="/books", tags=["Books"])
+MAX_BOOK_SIZE_BYTES = 100 * 1024 * 1024
 
 @router.post("/upload", response_model=BookResponse, status_code=status.HTTP_201_CREATED)
 async def upload_book(
     file: UploadFile = File(...),
     book_service: BookService = Depends(get_book_service)
 ):
-    if not file.filename.lower().endswith(".pdf"):
+    filename = file.filename or ""
+    extension = get_book_extension(filename)
+    if extension not in SUPPORTED_BOOK_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only PDF files are supported."
+            detail=f"Unsupported book format. Choose {SUPPORTED_FORMAT_LABEL}."
         )
 
-    content = await file.read()
+    content = await file.read(MAX_BOOK_SIZE_BYTES + 1)
     if len(content) == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Uploaded file is empty."
         )
+    if len(content) > MAX_BOOK_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="The book exceeds the 100 MB import limit."
+        )
 
     book_doc = await book_service.upload_book(
-        original_filename=file.filename,
+        original_filename=filename,
         file_bytes=content,
-        mime_type=file.content_type or "application/pdf"
+        mime_type=get_book_mime_type(filename)
     )
     return book_doc
 
@@ -101,7 +114,7 @@ async def get_book_content(
         html_bytes = await storage_service.get_file_bytes(html_key)
         return HTMLResponse(content=html_bytes.decode("utf-8"))
 
-@router.get("/{book_id}/cover")
+@router.api_route("/{book_id}/cover", methods=["GET", "HEAD"])
 async def get_book_cover(
     book_id: str,
     book_service: BookService = Depends(get_book_service)
