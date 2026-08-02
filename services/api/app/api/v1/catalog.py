@@ -3,6 +3,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.dependencies import get_book_service, get_current_user
+from app.catalog import ensure_catalog_books
 from app.schemas.book import BookResponse
 from app.services.book_service import BookService
 
@@ -17,6 +18,9 @@ async def list_catalog(
     current_user: dict = Depends(get_current_user),
 ):
     del current_user
+    # This is idempotent and also repairs a catalog that was created before a
+    # deploy included all bundled assets.
+    await ensure_catalog_books()
     return await book_service.list_catalog(limit=min(max(limit, 1), 100))
 
 

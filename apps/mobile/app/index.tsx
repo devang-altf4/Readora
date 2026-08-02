@@ -23,6 +23,15 @@ import { useThemeStore } from '../src/state/useThemeStore';
 import { BookCoverCard } from '../src/components/BookCoverCard';
 import { useAuthStore } from '../src/state/useAuthStore';
 import { addCatalogBook, listCatalogBooks } from '../src/services/catalogService';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
 
 export default function LibraryScreen() {
   const db = useSQLiteContext();
@@ -42,6 +51,16 @@ export default function LibraryScreen() {
   const [activeTab, setActiveTab] = useState<'home' | 'library' | 'settings'>('home');
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [activeFilter, setActiveFilter] = useState<string>('Best Sellers');
+  const importPromptProgress = useSharedValue(0);
+
+  const importPromptAnimation = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(importPromptProgress.value, [0, 1], [0, -3]) }],
+  }));
+
+  const importArrowAnimation = useAnimatedStyle(() => ({
+    transform: [{ translateX: interpolate(importPromptProgress.value, [0, 1], [0, 5]) }],
+    opacity: interpolate(importPromptProgress.value, [0, 1], [0.65, 1]),
+  }));
 
   const { searchQuery, setSearchQuery, viewMode, setViewMode, sortBy } = useLibraryStore();
 
@@ -85,6 +104,15 @@ export default function LibraryScreen() {
   useEffect(() => {
     loadBooks();
   }, [sortBy]);
+
+  useEffect(() => {
+    importPromptProgress.value = withRepeat(
+      withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }),
+      -1,
+      true,
+    );
+    return () => cancelAnimation(importPromptProgress);
+  }, [importPromptProgress]);
 
   useEffect(() => {
     let active = true;
@@ -409,6 +437,38 @@ export default function LibraryScreen() {
             })}
           </ScrollView>
 
+          <Animated.View
+            style={[
+              styles.importPromptCard,
+              {
+                backgroundColor: colors.isDark ? '#11152B' : '#F4ECE1',
+                borderColor: colors.isDark ? '#3B82F6' : '#C49A45',
+              },
+              importPromptAnimation,
+            ]}
+          >
+            <View style={styles.importPromptCopy}>
+              <Text style={[styles.importPromptEyebrow, { color: colors.accent }]}>YOUR BOOK, YOUR SANCTUARY</Text>
+              <Text style={[styles.importPromptTitle, { color: colors.textPrimary }]}>Want to read your own book?</Text>
+              <Text style={[styles.importPromptSubtitle, { color: colors.textSecondary }]}>Tap Import Book to bring a PDF, EPUB, Kindle file, or any supported format into Readora.</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.importPromptButton, { backgroundColor: colors.accent }]}
+              onPress={handleImport}
+              disabled={importing}
+              activeOpacity={0.82}
+            >
+              {importing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Text style={styles.importPromptButtonText}>Import Book</Text>
+                  <Animated.Text style={[styles.importPromptArrow, importArrowAnimation]}>→</Animated.Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
+
           {catalogBooks.length > 0 && (
             <View style={styles.catalogSection}>
               <View style={styles.catalogHeaderRow}>
@@ -701,6 +761,54 @@ const styles = StyleSheet.create({
   secondaryPillText: {
     fontSize: 13,
     fontWeight: '500',
+  },
+  importPromptCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 12,
+    marginBottom: 14,
+  },
+  importPromptCopy: {
+    flex: 1,
+    gap: 3,
+  },
+  importPromptEyebrow: {
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  importPromptTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  importPromptSubtitle: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  importPromptButton: {
+    minWidth: 104,
+    minHeight: 42,
+    borderRadius: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  importPromptButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  importPromptArrow: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
   },
   catalogSection: {
     marginTop: 14,
