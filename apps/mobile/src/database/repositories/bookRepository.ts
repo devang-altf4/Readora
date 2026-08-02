@@ -146,10 +146,10 @@ export class BookSQLiteRepository {
         [
           'global',
           settings.theme ?? 'dark',
-          settings.fontFamily ?? 'Bookerly',
-          settings.fontSize ?? 18,
-          settings.lineHeight ?? 1.285,
-          settings.horizontalMargin ?? 32,
+          settings.fontFamily ?? 'Baskerville',
+          settings.fontSize ?? 16,
+          settings.lineHeight ?? 1.45,
+          settings.horizontalMargin ?? 28,
           settings.readingMode ?? 'smart_reading',
           now
         ]

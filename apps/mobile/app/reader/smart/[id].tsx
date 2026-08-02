@@ -17,7 +17,14 @@ import { StatusBar } from 'expo-status-bar';
 import { BookSQLiteRepository } from '../../../src/database/repositories/bookRepository';
 import { LocalBook } from '../../../src/types';
 import { apiClient } from '../../../src/services/apiClient';
-import { getBookerlyFontFaceStyles } from '../../../src/utils/localFontLoader';
+import { useThemeStore } from '../../../src/state/useThemeStore';
+import { getReaderFontFaceStyles } from '../../../src/utils/localFontLoader';
+
+const EBOOK_READER_DEFAULTS = {
+  fontSize: 16,
+  lineHeight: 1.45,
+  horizontalMargin: 28,
+} as const;
 
 export default function SmartReadingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -25,6 +32,9 @@ export default function SmartReadingScreen() {
   const repo = new BookSQLiteRepository(db);
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const appThemeMode = useThemeStore((state) => state.themeMode);
+  const appThemeModeRef = useRef(appThemeMode);
+  appThemeModeRef.current = appThemeMode;
 
   const [book, setBook] = useState<LocalBook | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,12 +44,12 @@ export default function SmartReadingScreen() {
 
   // Calibrated default settings with Baskerville typography
   const [theme, setTheme] = useState<'light' | 'sepia' | 'dark'>('dark');
-  const [fontSize, setFontSize] = useState(15);
-  const [lineHeight, setLineHeight] = useState(1.35);
-  const [horizontalMargin, setHorizontalMargin] = useState(24);
+  const [fontSize, setFontSize] = useState<number>(EBOOK_READER_DEFAULTS.fontSize);
+  const [lineHeight, setLineHeight] = useState<number>(EBOOK_READER_DEFAULTS.lineHeight);
+  const [horizontalMargin, setHorizontalMargin] = useState<number>(EBOOK_READER_DEFAULTS.horizontalMargin);
   const [fontFamily, setFontFamily] = useState<'Baskerville' | 'Bookerly' | 'Georgia' | 'System'>('Baskerville');
   const [fontFontFaceCss, setFontFaceCss] = useState('');
-  const [isFontLoaded, setIsFontLoaded] = useState(true);
+  const [isFontLoaded, setIsFontLoaded] = useState(false);
 
   // Page locations
   const [currentPage, setCurrentPage] = useState(1);
@@ -52,18 +62,44 @@ export default function SmartReadingScreen() {
     async function loadSmartContent() {
       if (!id) return;
       try {
-        // Load local font CSS declarations & Baskerville webfont rules
-        const fontData = await getBookerlyFontFaceStyles();
+        // Embed bundled Baskerville font data before constructing WebView HTML.
+        const fontData = await getReaderFontFaceStyles();
         setFontFaceCss(fontData.fontCss);
+        setIsFontLoaded(fontData.isLoaded);
 
         // Load saved global reader settings
         const savedSettings = await repo.getReaderSettings();
         if (savedSettings) {
-          if (savedSettings.theme) setTheme(savedSettings.theme as any);
-          if (savedSettings.fontSize) setFontSize(savedSettings.fontSize);
-          if (savedSettings.lineHeight) setLineHeight(savedSettings.lineHeight);
-          if (savedSettings.horizontalMargin) setHorizontalMargin(savedSettings.horizontalMargin);
-          if (savedSettings.fontFamily) setFontFamily(savedSettings.fontFamily as any);
+          // The app-level appearance setting is the source of truth for the
+          // reader's light/dark mode. Sepia remains available from the reader
+          // sheet when the app is using its system appearance mode.
+          const appTheme = appThemeModeRef.current === 'light'
+            ? 'light'
+            : appThemeModeRef.current === 'dark'
+              ? 'dark'
+              : null;
+          if (appTheme) setTheme(appTheme);
+          else if (savedSettings.theme) setTheme(savedSettings.theme as any);
+
+          const isLegacyTypography =
+            (savedSettings.fontSize === 18 && Math.abs(savedSettings.lineHeight - 1.285) < 0.001 && savedSettings.horizontalMargin === 32) ||
+            (savedSettings.fontSize === 15 && Math.abs(savedSettings.lineHeight - 1.35) < 0.001 && savedSettings.horizontalMargin === 24);
+          if (isLegacyTypography) {
+            setFontSize(EBOOK_READER_DEFAULTS.fontSize);
+            setLineHeight(EBOOK_READER_DEFAULTS.lineHeight);
+            setHorizontalMargin(EBOOK_READER_DEFAULTS.horizontalMargin);
+            await repo.saveReaderSettings(EBOOK_READER_DEFAULTS);
+          } else {
+            if (savedSettings.fontSize) setFontSize(savedSettings.fontSize);
+            if (savedSettings.lineHeight) setLineHeight(savedSettings.lineHeight);
+            if (savedSettings.horizontalMargin) setHorizontalMargin(savedSettings.horizontalMargin);
+          }
+          if (!['Baskerville', 'Georgia'].includes(savedSettings.fontFamily)) {
+            setFontFamily('Baskerville');
+            await repo.saveReaderSettings({ fontFamily: 'Baskerville' });
+          } else if (savedSettings.fontFamily) {
+            setFontFamily(savedSettings.fontFamily as any);
+          }
         }
 
         const data = await repo.getBookById(id);
@@ -109,6 +145,16 @@ export default function SmartReadingScreen() {
     }
   };
 
+  // Keep the reader in sync when the user changes Appearance Settings outside
+  // the reader. This fixes Light Mode showing a dark WebView.
+  useEffect(() => {
+    if (appThemeMode === 'system') return;
+    const nextTheme = appThemeMode === 'light' ? 'light' : 'dark';
+    setTheme(nextTheme);
+    postWebViewMessage({ type: 'SET_THEME', theme: nextTheme });
+    void repo.saveReaderSettings({ theme: nextTheme });
+  }, [appThemeMode]);
+
   const changeTheme = async (newTheme: 'light' | 'sepia' | 'dark') => {
     setTheme(newTheme);
     postWebViewMessage({ type: 'SET_THEME', theme: newTheme });
@@ -129,16 +175,15 @@ export default function SmartReadingScreen() {
   };
 
   const resetTypographyToDefault = async () => {
-    setFontSize(15);
-    setLineHeight(1.35);
-    setHorizontalMargin(24);
-    setTheme('dark');
+    const defaultTheme = appThemeMode === 'light' ? 'light' : 'dark';
+    setFontSize(EBOOK_READER_DEFAULTS.fontSize);
+    setLineHeight(EBOOK_READER_DEFAULTS.lineHeight);
+    setHorizontalMargin(EBOOK_READER_DEFAULTS.horizontalMargin);
+    setTheme(defaultTheme);
     setFontFamily('Baskerville');
     await repo.saveReaderSettings({
-      fontSize: 15,
-      lineHeight: 1.35,
-      horizontalMargin: 24,
-      theme: 'dark',
+      ...EBOOK_READER_DEFAULTS,
+      theme: defaultTheme,
       fontFamily: 'Baskerville',
     });
   };
@@ -182,15 +227,13 @@ export default function SmartReadingScreen() {
 
     const customStyleBlock = `
       <style id="kindle-calibrated-head-styles">
-        @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
-
         ${fontFontFaceCss}
 
         :root {
           --reader-background: ${bgColors[theme]};
           --reader-text: ${textColors[theme]};
           --reader-secondary-text: ${subTextColors[theme]};
-          --reader-bold-text: #D7D7D7;
+          --reader-bold-text: ${textColors[theme]};
           --reader-font-size: ${fontSize}px;
           --reader-line-height: ${lineHeight};
           --reader-horizontal-padding: ${horizontalMargin}px;
@@ -256,6 +299,7 @@ export default function SmartReadingScreen() {
           scroll-snap-type: x mandatory !important;
           scroll-behavior: smooth !important;
           -webkit-overflow-scrolling: touch !important;
+          touch-action: pan-x !important;
           scrollbar-width: none !important;
         }
         .reader-container::-webkit-scrollbar {
@@ -308,21 +352,30 @@ export default function SmartReadingScreen() {
           font-family: ${fontStr} !important;
           font-style: normal !important;
           font-weight: 700 !important;
-          color: #D7D7D7 !important;
+          color: var(--reader-bold-text) !important;
         }
         strong em, strong i {
           font-family: ${fontStr} !important;
           font-style: italic !important;
           font-weight: 700 !important;
-          color: #D7D7D7 !important;
+          color: var(--reader-bold-text) !important;
         }
       </style>
     `;
 
     return htmlContent
+      // Generated HTML may contain its own touch handler. The native WebView
+      // scroll view must be the only owner of swipe gestures.
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace('</head>', `${customStyleBlock}</head>`)
-      .replace(/<body class="theme-[^"]*"/, `<body class="theme-${theme}"`);
+      .replace(/<body class="theme-[^"]*"/i, `<body class="theme-${theme}"`)
+      .replace(/<body(?![^>]*\bclass=)/i, `<body class="theme-${theme}"`);
   }, [htmlContent, theme, fontSize, lineHeight, horizontalMargin, fontFamily, fontFontFaceCss]);
+
+  const webViewSource = useMemo(
+    () => ({ html: preparedHtmlContent }),
+    [preparedHtmlContent]
+  );
 
   if (loading || !book || !htmlContent) {
     return (
@@ -364,18 +417,19 @@ export default function SmartReadingScreen() {
       setTimeout(updatePageInfo, 100);
 
       document.fonts.ready.then(function() {
+        var loaded = document.fonts.check('${fontSize}px "Libre Baskerville"');
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'FONT_STATUS',
           font: 'Baskerville',
-          loaded: true
+          loaded: loaded
         }));
       });
 
-      // Smooth native CSS scroll snap with zero JS jitter
+      // Native horizontal scrolling owns swipes. JavaScript only handles tap
+      // zones, so a swipe is never followed by a second full-page jump.
       var touchStartX = 0;
       var touchStartY = 0;
       var touchStartTime = 0;
-      var isGestureLocked = false;
 
       slider.addEventListener('touchstart', function(e) {
         if (e.touches.length === 1) {
@@ -386,7 +440,7 @@ export default function SmartReadingScreen() {
       }, { passive: true });
 
       slider.addEventListener('touchend', function(e) {
-        if (isGestureLocked || !e.changedTouches || e.changedTouches.length === 0) return;
+        if (!e.changedTouches || e.changedTouches.length === 0) return;
 
         var touchEndX = e.changedTouches[0].clientX;
         var touchEndY = e.changedTouches[0].clientY;
@@ -394,28 +448,15 @@ export default function SmartReadingScreen() {
         var deltaY = touchEndY - touchStartY;
         var duration = Date.now() - touchStartTime;
 
-        var isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
-        var passedThreshold = Math.abs(deltaX) >= 48;
-
-        if (isHorizontal && passedThreshold) {
-          isGestureLocked = true;
-          setTimeout(function() { isGestureLocked = false; }, 260);
-
+        if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {
           var width = window.innerWidth;
-          if (deltaX < 0) {
-            // Finger moves Right to Left (deltaX < 0) -> NEXT PAGE
-            slider.scrollLeft += width;
-          } else {
-            // Finger moves Left to Right (deltaX > 0) -> PREVIOUS PAGE
-            slider.scrollLeft -= width;
-          }
-        } else if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {
-          var width = window.innerWidth;
+          var maxScroll = Math.max(0, slider.scrollWidth - width);
+          var currentPage = Math.round((slider.scrollLeft || 0) / width);
           var clickX = touchEndX;
           if (clickX < width * 0.25) {
-            slider.scrollLeft -= width;
+            slider.scrollTo({ left: Math.max(0, (currentPage - 1) * width), behavior: 'smooth' });
           } else if (clickX > width * 0.75) {
-            slider.scrollLeft += width;
+            slider.scrollTo({ left: Math.min(maxScroll, (currentPage + 1) * width), behavior: 'smooth' });
           } else {
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'TOGGLE_CONTROLS' }));
           }
@@ -476,10 +517,12 @@ export default function SmartReadingScreen() {
         <WebView
           ref={webViewRef}
           originWhitelist={['*']}
-          source={{ html: preparedHtmlContent }}
+          source={webViewSource}
           style={[styles.webview, { backgroundColor: bgColors[theme] }]}
           containerStyle={{ backgroundColor: bgColors[theme] }}
           injectedJavaScript={injectedJs}
+          bounces={false}
+          overScrollMode="never"
           onMessage={(event) => {
             try {
               const data = JSON.parse(event.nativeEvent.data);
@@ -547,7 +590,7 @@ export default function SmartReadingScreen() {
             {/* Font Family Selection */}
             <Text style={[styles.label, { color: subTextColors[theme] }]}>Font Family</Text>
             <View style={styles.themeRow}>
-              {(['Baskerville', 'Bookerly', 'Georgia'] as const).map((font) => (
+              {(['Baskerville', 'Georgia'] as const).map((font) => (
                 <TouchableOpacity
                   key={font}
                   style={[

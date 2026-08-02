@@ -41,10 +41,10 @@ export async function initializeDatabase(db: SQLite.SQLiteDatabase): Promise<voi
       id TEXT PRIMARY KEY NOT NULL,
       bookId TEXT,
       theme TEXT DEFAULT 'dark',
-      fontFamily TEXT DEFAULT 'Bookerly',
-      fontSize INTEGER DEFAULT 18,
-      lineHeight REAL DEFAULT 1.285,
-      horizontalMargin INTEGER DEFAULT 32,
+      fontFamily TEXT DEFAULT 'Baskerville',
+      fontSize INTEGER DEFAULT 16,
+      lineHeight REAL DEFAULT 1.45,
+      horizontalMargin INTEGER DEFAULT 28,
       readingMode TEXT DEFAULT 'original_pdf',
       updatedAt TEXT NOT NULL
     );

@@ -412,11 +412,11 @@ class ProcessingPipeline:
       }}));
     }});
 
-    // Smooth native CSS scroll snap with zero JS jitter
+    // Native horizontal scrolling owns swipes. JavaScript only handles tap
+    // zones, so a swipe is never followed by a second full-page jump.
     var touchStartX = 0;
     var touchStartY = 0;
     var touchStartTime = 0;
-    var isGestureLocked = false;
 
     slider.addEventListener('touchstart', function(e) {{
       if (e.touches.length === 1) {{
@@ -427,7 +427,7 @@ class ProcessingPipeline:
     }}, {{ passive: true }});
 
     slider.addEventListener('touchend', function(e) {{
-      if (isGestureLocked || !e.changedTouches || e.changedTouches.length === 0) return;
+      if (!e.changedTouches || e.changedTouches.length === 0) return;
 
       var touchEndX = e.changedTouches[0].clientX;
       var touchEndY = e.changedTouches[0].clientY;
@@ -435,28 +435,15 @@ class ProcessingPipeline:
       var deltaY = touchEndY - touchStartY;
       var duration = Date.now() - touchStartTime;
 
-      var isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
-      var passedThreshold = Math.abs(deltaX) >= 48;
-
-      if (isHorizontal && passedThreshold) {{
-        isGestureLocked = true;
-        setTimeout(function() {{ isGestureLocked = false; }}, 260);
-
+      if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {{
         var width = window.innerWidth;
-        if (deltaX < 0) {{
-          // Finger moves Right to Left -> NEXT PAGE
-          slider.scrollLeft += width;
-        }} else {{
-          // Finger moves Left to Right -> PREVIOUS PAGE
-          slider.scrollLeft -= width;
-        }}
-      }} else if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {{
-        var width = window.innerWidth;
+        var maxScroll = Math.max(0, slider.scrollWidth - width);
+        var currentPage = Math.round((slider.scrollLeft || 0) / width);
         var clickX = touchEndX;
         if (clickX < width * 0.25) {{
-          slider.scrollLeft -= width;
+          slider.scrollTo({{ left: Math.max(0, (currentPage - 1) * width), behavior: 'smooth' }});
         }} else if (clickX > width * 0.75) {{
-          slider.scrollLeft += width;
+          slider.scrollTo({{ left: Math.min(maxScroll, (currentPage + 1) * width), behavior: 'smooth' }});
         }} else {{
           window.ReactNativeWebView.postMessage(JSON.stringify({{ type: 'TOGGLE_CONTROLS' }}));
         }}

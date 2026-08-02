@@ -1,9 +1,9 @@
 {
   "expo": {
-    "name": "Dindle",
-    "slug": "dindle",
+    "name": "Readora",
+    "slug": "readora",
     "version": "1.0.0",
-    "scheme": "dindle",
+    "scheme": "readora",
     "orientation": "portrait",
     "extra": {
       "apiBaseUrl": "http://192.168.29.159:8000/api/v1"
@@ -12,16 +12,16 @@
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash-icon.png",
-      "backgroundColor": "#000000"
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#000000",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png"
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./assets/android-icon-foreground.png"
       }
     },
     "plugins": [
