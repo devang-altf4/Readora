@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -17,34 +18,6 @@ import { BookSQLiteRepository } from '../../../src/database/repositories/bookRep
 import { LocalBook } from '../../../src/types';
 import { apiClient } from '../../../src/services/apiClient';
 import { getBookerlyFontFaceStyles } from '../../../src/utils/localFontLoader';
-import { uploadBookForSmartReading } from '../../../src/services/importService';
-import { API_CONFIG } from '../../../src/constants/config';
-
-const KINDLE_TYPOGRAPHY = {
-  fontSize: 18,
-  lineHeight: 1.285,
-  horizontalMargin: 32,
-} as const;
-
-const SMART_READER_TIMEOUT_MS = 5 * 60 * 1000;
-
-const wait = (milliseconds: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
-
-const getReaderErrorMessage = (error: unknown): string => {
-  const requestError = error as any;
-  const backendDetail = requestError?.response?.data?.detail;
-  if (typeof backendDetail === 'string' && backendDetail) {
-    return backendDetail;
-  }
-  if (requestError?.code === 'ECONNABORTED') {
-    return 'The reader service timed out.';
-  }
-  if (requestError?.message === 'Network Error') {
-    return `The phone could not reach ${API_CONFIG.baseUrl}. Check that the backend is running and both devices are on the same Wi-Fi.`;
-  }
-  return requestError?.message || 'Smart Reader content could not be loaded.';
-};
 
 export default function SmartReadingScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -58,18 +31,15 @@ export default function SmartReadingScreen() {
   const [htmlContent, setHtmlContent] = useState<string>('');
   const [controlsVisible, setControlsVisible] = useState(false);
   const [settingsModalVisible, setSettingsModalVisible] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('Loading Reader...');
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
 
-  // Calibrated defaults matching the Kindle reference density and rhythm.
+  // Calibrated default settings with Baskerville typography
   const [theme, setTheme] = useState<'light' | 'sepia' | 'dark'>('dark');
-  const [fontSize, setFontSize] = useState<number>(KINDLE_TYPOGRAPHY.fontSize);
-  const [lineHeight, setLineHeight] = useState<number>(KINDLE_TYPOGRAPHY.lineHeight);
-  const [horizontalMargin, setHorizontalMargin] = useState<number>(KINDLE_TYPOGRAPHY.horizontalMargin);
-  const [fontFamily, setFontFamily] = useState<'Bookerly' | 'Georgia' | 'System'>('Bookerly');
+  const [fontSize, setFontSize] = useState(15);
+  const [lineHeight, setLineHeight] = useState(1.35);
+  const [horizontalMargin, setHorizontalMargin] = useState(24);
+  const [fontFamily, setFontFamily] = useState<'Baskerville' | 'Bookerly' | 'Georgia' | 'System'>('Baskerville');
   const [fontFontFaceCss, setFontFaceCss] = useState('');
-  const [isTrueBookerlyLoaded, setIsTrueBookerlyLoaded] = useState(false);
+  const [isFontLoaded, setIsFontLoaded] = useState(true);
 
   // Page locations
   const [currentPage, setCurrentPage] = useState(1);
@@ -79,166 +49,59 @@ export default function SmartReadingScreen() {
   const webViewRef = useRef<WebView>(null);
 
   useEffect(() => {
-    let cancelled = false;
-
     async function loadSmartContent() {
-      if (!id) {
-        setLoadError('This book does not have a valid local ID.');
-        setLoading(false);
-        return;
-      }
-
-      let currentBook: LocalBook | null = null;
-
-      const loadCachedContent = async (candidate: LocalBook | null): Promise<boolean> => {
-        if (!candidate?.cachedSmartContentUri) return false;
-
-        const cachedFile = new File(candidate.cachedSmartContentUri);
-        if (!cachedFile.exists) return false;
-
-        const content = await cachedFile.text();
-        if (!content.trim()) return false;
-
-        if (!cancelled) {
-          setHtmlContent(content);
-          setBook(candidate);
-        }
-        return true;
-      };
-
+      if (!id) return;
       try {
-        setLoading(true);
-        setLoadError(null);
-        setLoadingMessage('Loading Reader...');
-
         // Load local font CSS declarations
         const fontData = await getBookerlyFontFaceStyles();
-        if (cancelled) return;
         setFontFaceCss(fontData.fontCss);
-        setIsTrueBookerlyLoaded(fontData.isLoaded);
 
         // Load saved global reader settings
         const savedSettings = await repo.getReaderSettings();
         if (savedSettings) {
-          const hasLegacyDefaultTypography =
-            savedSettings.fontSize === 15 &&
-            (Math.abs(savedSettings.lineHeight - 1.35) < 0.001 || Math.abs(savedSettings.lineHeight - 1.6) < 0.001) &&
-            (savedSettings.horizontalMargin === 20 || savedSettings.horizontalMargin === 24);
-
           if (savedSettings.theme) setTheme(savedSettings.theme as any);
-          setFontSize(hasLegacyDefaultTypography ? KINDLE_TYPOGRAPHY.fontSize : savedSettings.fontSize);
-          setLineHeight(hasLegacyDefaultTypography ? KINDLE_TYPOGRAPHY.lineHeight : savedSettings.lineHeight);
-          setHorizontalMargin(hasLegacyDefaultTypography ? KINDLE_TYPOGRAPHY.horizontalMargin : savedSettings.horizontalMargin);
+          if (savedSettings.fontSize) setFontSize(savedSettings.fontSize);
+          if (savedSettings.lineHeight) setLineHeight(savedSettings.lineHeight);
+          if (savedSettings.horizontalMargin) setHorizontalMargin(savedSettings.horizontalMargin);
           if (savedSettings.fontFamily) setFontFamily(savedSettings.fontFamily as any);
-
-          if (hasLegacyDefaultTypography) {
-            await repo.saveReaderSettings(KINDLE_TYPOGRAPHY);
-          }
         }
 
         const data = await repo.getBookById(id);
-        if (!data) {
-          throw new Error('This book is no longer available in the local library.');
-        }
-        currentBook = data;
+        if (!data) return;
         setBook(data);
 
-        // Repair books imported by older builds that opened the reader before
-        // their background upload returned a backend ID.
-        if (!currentBook.backendBookId) {
-          setLoadingMessage('Connecting to Smart Reader...');
-          currentBook = await uploadBookForSmartReading(repo, currentBook);
-          if (cancelled) return;
-          setBook(currentBook);
-        }
+        // Fetch fresh HTML from backend if available, or fallback to local cache
+        if (data.backendBookId) {
+          try {
+            const response = await apiClient.get(`/books/${data.backendBookId}/content?format=html`);
+            const fetchedHtml = response.data;
+            setHtmlContent(fetchedHtml);
 
-        const backendBookId = currentBook.backendBookId;
-        if (!backendBookId) {
-          throw new Error('The backend did not return a Smart Reader book ID.');
-        }
-
-        const deadline = Date.now() + SMART_READER_TIMEOUT_MS;
-        let contentReady = false;
-
-        while (!cancelled && !contentReady) {
-          const statusResponse = await apiClient.get(`/books/${backendBookId}`, { timeout: 10000 });
-          const backendBook = statusResponse.data;
-          const status = backendBook.processingStatus || 'processing';
-          const progress = backendBook.processingProgress ?? 0;
-          const stage = backendBook.processingStage || 'preparing_content';
-
-          await repo.updateBackendStatus(
-            currentBook.id,
-            backendBookId,
-            status,
-            progress,
-            status === 'ready' || status === 'ocr_required'
-          );
-
-          currentBook = {
-            ...currentBook,
-            backendProcessingStatus: status,
-            backendProcessingProgress: progress,
-            smartModeAvailable: status === 'ready' || status === 'ocr_required',
-          };
-
-          if (!cancelled) {
-            setBook(currentBook);
-            setLoadingMessage(`Preparing Reader... ${progress}% (${stage.replace(/_/g, ' ')})`);
+            const booksDir = new Directory(Paths.document, 'books/');
+            if (!booksDir.exists) { booksDir.create(); }
+            const cacheFile = new File(booksDir, `cache_${data.id}.html`);
+            cacheFile.write(fetchedHtml);
+            await repo.updateBackendStatus(data.id, data.backendBookId, data.backendProcessingStatus, 100, true);
+          } catch (fetchErr) {
+            if (data.cachedSmartContentUri) {
+              const cachedFile = new File(data.cachedSmartContentUri);
+              const content = await cachedFile.text();
+              setHtmlContent(content);
+            }
           }
-
-          if (status === 'ready' || status === 'ocr_required') {
-            contentReady = true;
-            break;
-          }
-          if (status === 'failed') {
-            throw new Error(backendBook.processingError?.message || 'The backend could not process this PDF.');
-          }
-          if (Date.now() >= deadline) {
-            throw new Error('Smart Reader processing took longer than five minutes. Please retry.');
-          }
-
-          await wait(1200);
+        } else if (data.cachedSmartContentUri) {
+          const cachedFile = new File(data.cachedSmartContentUri);
+          const content = await cachedFile.text();
+          setHtmlContent(content);
         }
-
-        if (cancelled) return;
-
-        setLoadingMessage('Opening Reader...');
-        const response = await apiClient.get(`/books/${backendBookId}/content?format=html`, { timeout: 30000 });
-        const fetchedHtml = response.data;
-        if (typeof fetchedHtml !== 'string' || !fetchedHtml.trim()) {
-          throw new Error('The backend returned empty Smart Reader content.');
-        }
-
-        const booksDir = new Directory(Paths.document, 'books/');
-        if (!booksDir.exists) { booksDir.create(); }
-        const cacheFile = new File(booksDir, `cache_${currentBook.id}.html`);
-        cacheFile.write(fetchedHtml);
-        await repo.updateSmartContentCache(currentBook.id, cacheFile.uri);
-
-        if (!cancelled) {
-          setHtmlContent(fetchedHtml);
-        }
-      } catch (error) {
-        if (cancelled) return;
-
-        try {
-          if (await loadCachedContent(currentBook)) return;
-        } catch (cacheError) {
-          console.warn('Could not read cached Smart Reader content:', cacheError);
-        }
-
-        setLoadError(getReaderErrorMessage(error));
+      } catch (e: any) {
+        Alert.alert('Content Error', 'Could not load Smart Reading content.');
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     }
-
     loadSmartContent();
-    return () => {
-      cancelled = true;
-    };
-  }, [id, reloadKey]);
+  }, [id]);
 
   const postWebViewMessage = (msgObj: object) => {
     if (webViewRef.current) {
@@ -259,16 +122,24 @@ export default function SmartReadingScreen() {
     await repo.saveReaderSettings({ fontSize: newSize });
   };
 
+  const changeFontFamily = async (newFont: 'Baskerville' | 'Bookerly' | 'Georgia' | 'System') => {
+    setFontFamily(newFont);
+    postWebViewMessage({ type: 'SET_FONT_FAMILY', fontFamily: newFont });
+    await repo.saveReaderSettings({ fontFamily: newFont });
+  };
+
   const resetTypographyToDefault = async () => {
-    setFontSize(KINDLE_TYPOGRAPHY.fontSize);
-    setLineHeight(KINDLE_TYPOGRAPHY.lineHeight);
-    setHorizontalMargin(KINDLE_TYPOGRAPHY.horizontalMargin);
+    setFontSize(15);
+    setLineHeight(1.35);
+    setHorizontalMargin(24);
     setTheme('dark');
-    setFontFamily('Bookerly');
+    setFontFamily('Baskerville');
     await repo.saveReaderSettings({
-      ...KINDLE_TYPOGRAPHY,
+      fontSize: 15,
+      lineHeight: 1.35,
+      horizontalMargin: 24,
       theme: 'dark',
-      fontFamily: 'Bookerly',
+      fontFamily: 'Baskerville',
     });
   };
 
@@ -291,11 +162,23 @@ export default function SmartReadingScreen() {
     dark: '#BCBCBC',
   };
 
+  // Resolve CSS font-family stack based on selected font
+  const resolveFontStack = (font: string) => {
+    if (font === 'Baskerville') {
+      return '"Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif';
+    } else if (font === 'Bookerly') {
+      return '"Bookerly", Georgia, serif';
+    } else if (font === 'Georgia') {
+      return 'Georgia, serif';
+    }
+    return 'system-ui, -apple-system, sans-serif';
+  };
+
   // Pre-compile full styles into HTML head in memory so Frame 1 rendering is INSTANT with zero style shift
   const preparedHtmlContent = useMemo(() => {
     if (!htmlContent) return '';
 
-    const fontStr = fontFamily === 'Bookerly' ? '"Bookerly", Georgia, serif' : 'Georgia, serif';
+    const fontStr = resolveFontStack(fontFamily);
 
     const customStyleBlock = `
       <style id="kindle-calibrated-head-styles">
@@ -309,9 +192,9 @@ export default function SmartReadingScreen() {
           --reader-font-size: ${fontSize}px;
           --reader-line-height: ${lineHeight};
           --reader-horizontal-padding: ${horizontalMargin}px;
-          --reader-top-padding: 72px;
-          --reader-bottom-padding: 92px;
-          --reader-paragraph-spacing: 0.72em;
+          --reader-top-padding: 58px;
+          --reader-bottom-padding: 88px;
+          --reader-paragraph-spacing: 0.68em;
         }
         html, body {
           width: 100%;
@@ -369,6 +252,7 @@ export default function SmartReadingScreen() {
           overflow-x: scroll !important;
           overflow-y: hidden !important;
           scroll-snap-type: x mandatory !important;
+          scroll-behavior: smooth !important;
           -webkit-overflow-scrolling: touch !important;
           scrollbar-width: none !important;
         }
@@ -433,60 +317,21 @@ export default function SmartReadingScreen() {
       </style>
     `;
 
-    // Processed books may contain an older interaction bridge. The app owns
-    // gestures, so removing embedded scripts prevents duplicate swipe handlers.
     return htmlContent
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace('</head>', `${customStyleBlock}</head>`)
       .replace(/<body class="theme-[^"]*"/, `<body class="theme-${theme}"`);
   }, [htmlContent, theme, fontSize, lineHeight, horizontalMargin, fontFamily, fontFontFaceCss]);
 
-  const webViewSource = useMemo(
-    () => ({ html: preparedHtmlContent }),
-    [preparedHtmlContent]
-  );
-
-  if (loading) {
+  if (loading || !book || !htmlContent) {
     return (
       <View style={[styles.centered, { paddingTop: insets.top, backgroundColor: bgColors[theme] }]}>
         <ActivityIndicator size="large" color={textColors[theme]} />
-        <Text style={[styles.loadingText, { color: subTextColors[theme] }]}>{loadingMessage}</Text>
+        <Text style={[styles.loadingText, { color: subTextColors[theme] }]}>Loading Reader...</Text>
       </View>
     );
   }
 
-  if (!book || loadError || !htmlContent) {
-    return (
-      <View style={[styles.centered, styles.errorContainer, { paddingTop: insets.top, backgroundColor: bgColors[theme] }]}>
-        <Text style={[styles.errorTitle, { color: textColors[theme] }]}>Smart Reader Unavailable</Text>
-        <Text style={[styles.errorMessage, { color: subTextColors[theme] }]}>
-          {loadError || 'No Smart Reader content is available for this book.'}
-        </Text>
-        <Text style={[styles.apiAddressText, { color: subTextColors[theme] }]}>{API_CONFIG.baseUrl}</Text>
-        <View style={styles.errorActions}>
-          <TouchableOpacity
-            style={styles.primaryErrorButton}
-            onPress={() => setReloadKey((value) => value + 1)}
-          >
-            <Text style={styles.primaryErrorButtonText}>Retry Smart Reader</Text>
-          </TouchableOpacity>
-          {book && (
-            <TouchableOpacity
-              style={[styles.secondaryErrorButton, { borderColor: subTextColors[theme] }]}
-              onPress={() => router.replace(`/reader/pdf/${book.id}`)}
-            >
-              <Text style={[styles.secondaryErrorButtonText, { color: textColors[theme] }]}>Open Original PDF</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity onPress={() => router.replace('/')}>
-            <Text style={[styles.libraryLink, { color: subTextColors[theme] }]}>Back to Library</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
-  // Interaction bridge: native scrolling owns swipes; JS only handles taps and reporting.
+  // Pure interaction JS: Event listeners, tap-zones, scroll monitoring, font status & smooth native scroll snap
   const injectedJs = `
     (function() {
       var slider = document.getElementById('slider') || document.querySelector('.reader-container') || document.body;
@@ -497,7 +342,7 @@ export default function SmartReadingScreen() {
         var totalWidth = slider.scrollWidth || document.documentElement.scrollWidth;
         var currentScroll = slider.scrollLeft || window.scrollX || 0;
 
-        var currentPage = Math.max(1, Math.round(currentScroll / pageWidth) + 1);
+        var currentPage = Math.max(1, Math.floor(currentScroll / pageWidth) + 1);
         var totalPages = Math.max(1, Math.ceil(totalWidth / pageWidth));
         var progress = Math.min(100, Math.round((currentPage / totalPages) * 100));
 
@@ -517,25 +362,18 @@ export default function SmartReadingScreen() {
       setTimeout(updatePageInfo, 100);
 
       document.fonts.ready.then(function() {
-        var isBookerlyLoaded = document.fonts.check('${fontSize}px "Bookerly"');
         window.ReactNativeWebView.postMessage(JSON.stringify({
           type: 'FONT_STATUS',
-          font: 'Bookerly',
-          loaded: isBookerlyLoaded
+          font: 'Baskerville',
+          loaded: true
         }));
       });
 
-      function turnPage(direction) {
-        var width = window.innerWidth;
-        var maxScroll = Math.max(0, slider.scrollWidth - width);
-        var currentPageStart = Math.round(slider.scrollLeft / width) * width;
-        var target = Math.min(maxScroll, Math.max(0, currentPageStart + (direction * width)));
-        slider.scrollTo({ left: target, behavior: 'smooth' });
-      }
-
+      // Smooth native CSS scroll snap with zero JS jitter
       var touchStartX = 0;
       var touchStartY = 0;
       var touchStartTime = 0;
+      var isGestureLocked = false;
 
       slider.addEventListener('touchstart', function(e) {
         if (e.touches.length === 1) {
@@ -546,7 +384,7 @@ export default function SmartReadingScreen() {
       }, { passive: true });
 
       slider.addEventListener('touchend', function(e) {
-        if (!e.changedTouches || e.changedTouches.length === 0) return;
+        if (isGestureLocked || !e.changedTouches || e.changedTouches.length === 0) return;
 
         var touchEndX = e.changedTouches[0].clientX;
         var touchEndY = e.changedTouches[0].clientY;
@@ -554,13 +392,28 @@ export default function SmartReadingScreen() {
         var deltaY = touchEndY - touchStartY;
         var duration = Date.now() - touchStartTime;
 
-        if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {
+        var isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+        var passedThreshold = Math.abs(deltaX) >= 48;
+
+        if (isHorizontal && passedThreshold) {
+          isGestureLocked = true;
+          setTimeout(function() { isGestureLocked = false; }, 260);
+
+          var width = window.innerWidth;
+          if (deltaX < 0) {
+            // Finger moves Right to Left (deltaX < 0) -> NEXT PAGE
+            slider.scrollLeft += width;
+          } else {
+            // Finger moves Left to Right (deltaX > 0) -> PREVIOUS PAGE
+            slider.scrollLeft -= width;
+          }
+        } else if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {
           var width = window.innerWidth;
           var clickX = touchEndX;
           if (clickX < width * 0.25) {
-            turnPage(-1);
+            slider.scrollLeft -= width;
           } else if (clickX > width * 0.75) {
-            turnPage(1);
+            slider.scrollLeft += width;
           } else {
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'TOGGLE_CONTROLS' }));
           }
@@ -575,6 +428,11 @@ export default function SmartReadingScreen() {
             document.documentElement.style.setProperty('--reader-background', data.theme === 'dark' ? '#000000' : data.theme === 'sepia' ? '#F3E8D2' : '#F7F6F2');
           } else if (data.type === 'SET_FONT_SIZE') {
             document.documentElement.style.setProperty('--reader-font-size', data.size + 'px');
+          } else if (data.type === 'SET_FONT_FAMILY') {
+            var fontStack = data.fontFamily === 'Baskerville' 
+              ? '"Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif'
+              : data.fontFamily === 'Bookerly' ? '"Bookerly", Georgia, serif' : 'Georgia, serif';
+            document.body.style.fontFamily = fontStack;
           }
         } catch(e) {}
       });
@@ -616,12 +474,10 @@ export default function SmartReadingScreen() {
         <WebView
           ref={webViewRef}
           originWhitelist={['*']}
-          source={webViewSource}
+          source={{ html: preparedHtmlContent }}
           style={[styles.webview, { backgroundColor: bgColors[theme] }]}
           containerStyle={{ backgroundColor: bgColors[theme] }}
           injectedJavaScript={injectedJs}
-          bounces={false}
-          overScrollMode="never"
           onMessage={(event) => {
             try {
               const data = JSON.parse(event.nativeEvent.data);
@@ -636,9 +492,7 @@ export default function SmartReadingScreen() {
               } else if (data.type === 'TOGGLE_CONTROLS') {
                 setControlsVisible(!controlsVisible);
               } else if (data.type === 'FONT_STATUS') {
-                if (data.font === 'Bookerly') {
-                  setIsTrueBookerlyLoaded(data.loaded);
-                }
+                setIsFontLoaded(data.loaded);
               }
             } catch (e) {}
           }}
@@ -650,7 +504,7 @@ export default function SmartReadingScreen() {
         styles.kindleLocationFooter,
         {
           backgroundColor: bgColors[theme],
-          bottom: 28 + Math.max(insets.bottom, 0),
+          bottom: 24 + Math.max(insets.bottom, 0),
         }
       ]}>
         <Text style={[styles.kindleLocationText, { color: subTextColors[theme] }]}>
@@ -688,12 +542,22 @@ export default function SmartReadingScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Font Status Indicator */}
-            <View style={styles.fontStatusRow}>
-              <Text style={[styles.fontStatusLabel, { color: subTextColors[theme] }]}>Active Font:</Text>
-              <Text style={[styles.fontStatusValue, { color: isTrueBookerlyLoaded ? '#10B981' : '#F59E0B' }]}>
-                {isTrueBookerlyLoaded ? 'Bookerly Regular (Active)' : 'Bookerly (Missing .ttf files)'}
-              </Text>
+            {/* Font Family Selection */}
+            <Text style={[styles.label, { color: subTextColors[theme] }]}>Font Family</Text>
+            <View style={styles.themeRow}>
+              {(['Baskerville', 'Bookerly', 'Georgia'] as const).map((font) => (
+                <TouchableOpacity
+                  key={font}
+                  style={[
+                    styles.themeOption,
+                    { backgroundColor: theme === 'dark' ? '#2C2C2E' : '#EFEEE9' },
+                    fontFamily === font && styles.activeTheme
+                  ]}
+                  onPress={() => changeFontFamily(font)}
+                >
+                  <Text style={[styles.fontOptionText, { color: textColors[theme] }]}>{font}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
 
             {/* Color Mode Options */}
@@ -771,63 +635,6 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 12,
     fontSize: 14,
-    textAlign: 'center',
-    paddingHorizontal: 32,
-  },
-  errorContainer: {
-    paddingHorizontal: 28,
-  },
-  errorTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  errorMessage: {
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  apiAddressText: {
-    fontSize: 12,
-    marginTop: 10,
-    textAlign: 'center',
-  },
-  errorActions: {
-    width: '100%',
-    maxWidth: 320,
-    marginTop: 24,
-    gap: 12,
-  },
-  primaryErrorButton: {
-    minHeight: 46,
-    borderRadius: 8,
-    backgroundColor: '#3B82F6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  primaryErrorButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  secondaryErrorButton: {
-    minHeight: 46,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  secondaryErrorButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  libraryLink: {
-    fontSize: 14,
-    textAlign: 'center',
-    paddingVertical: 8,
   },
   topHeader: {
     position: 'absolute',
@@ -873,7 +680,7 @@ const styles = StyleSheet.create({
   },
   kindleLocationText: {
     fontFamily: 'System',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '400',
     lineHeight: 18,
     color: '#BCBCBC',
@@ -922,6 +729,10 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     marginTop: 4,
+  },
+  fontOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   themeRow: {
     flexDirection: 'row',

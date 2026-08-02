@@ -192,12 +192,12 @@ class ProcessingPipeline:
       --reader-text: #D0D0D0;
       --reader-secondary-text: #BCBCBC;
       --reader-bold-text: #D7D7D7;
-      --reader-font-size: 18px;
-      --reader-line-height: 1.285;
-      --reader-horizontal-padding: 32px;
-      --reader-top-padding: 72px;
-      --reader-bottom-padding: 92px;
-      --reader-paragraph-spacing: 0.72em;
+      --reader-font-size: 15px;
+      --reader-line-height: 1.35;
+      --reader-horizontal-padding: 24px;
+      --reader-top-padding: 58px;
+      --reader-bottom-padding: 88px;
+      --reader-paragraph-spacing: 0.68em;
     }}
 
     body.theme-light {{
@@ -237,7 +237,7 @@ class ProcessingPipeline:
     }}
 
     body {{
-      font-family: "Bookerly", Georgia, serif;
+      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
       font-size: var(--reader-font-size);
       font-style: normal;
       font-weight: 400;
@@ -279,6 +279,7 @@ class ProcessingPipeline:
       overflow-x: scroll;
       overflow-y: hidden;
       scroll-snap-type: x mandatory;
+      scroll-behavior: smooth;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
     }}
@@ -288,7 +289,7 @@ class ProcessingPipeline:
     }}
 
     .dindle-heading {{
-      font-family: "Bookerly", Georgia, serif;
+      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
       font-weight: 700;
       margin-top: 1.4em;
       margin-bottom: 0.8em;
@@ -305,7 +306,7 @@ class ProcessingPipeline:
     }}
 
     .dindle-paragraph, p {{
-      font-family: "Bookerly", Georgia, serif;
+      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
       font-size: var(--reader-font-size);
       line-height: var(--reader-line-height);
       width: 100vw;
@@ -328,20 +329,20 @@ class ProcessingPipeline:
     }}
 
     em, i {{
-      font-family: "Bookerly", Georgia, serif;
+      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
       font-style: italic;
       font-weight: 400;
     }}
 
     strong, b {{
-      font-family: "Bookerly", Georgia, serif;
+      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
       font-style: normal;
       font-weight: 700;
       color: var(--reader-bold-text);
     }}
 
     strong em, strong i {{
-      font-family: "Bookerly", Georgia, serif;
+      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
       font-style: italic;
       font-weight: 700;
       color: var(--reader-bold-text);
@@ -362,7 +363,7 @@ class ProcessingPipeline:
       const totalWidth = slider.scrollWidth || document.documentElement.scrollWidth;
       const currentScroll = slider.scrollLeft || window.scrollX || 0;
 
-      const currentPage = Math.max(1, Math.round(currentScroll / pageWidth) + 1);
+      const currentPage = Math.max(1, Math.floor(currentScroll / pageWidth) + 1);
       const totalPages = Math.max(1, Math.ceil(totalWidth / pageWidth));
       const progress = Math.min(100, Math.round((currentPage / totalPages) * 100));
 
@@ -382,25 +383,19 @@ class ProcessingPipeline:
     setTimeout(updatePageInfo, 100);
 
     document.fonts.ready.then(function() {{
-      const loaded = document.fonts.check('18px "Bookerly"');
+      const loaded = document.fonts.check('15px "Baskerville"') || document.fonts.check('15px "Bookerly"');
       window.ReactNativeWebView.postMessage(JSON.stringify({{
         type: 'FONT_STATUS',
-        font: 'Bookerly',
+        font: 'Baskerville',
         loaded: loaded
       }}));
     }});
 
-    function turnPage(direction) {{
-      var width = window.innerWidth;
-      var maxScroll = Math.max(0, slider.scrollWidth - width);
-      var currentPageStart = Math.round(slider.scrollLeft / width) * width;
-      var target = Math.min(maxScroll, Math.max(0, currentPageStart + (direction * width)));
-      slider.scrollTo({{ left: target, behavior: 'smooth' }});
-    }}
-
+    // Smooth native CSS scroll snap with zero JS jitter
     var touchStartX = 0;
     var touchStartY = 0;
     var touchStartTime = 0;
+    var isGestureLocked = false;
 
     slider.addEventListener('touchstart', function(e) {{
       if (e.touches.length === 1) {{
@@ -411,7 +406,7 @@ class ProcessingPipeline:
     }}, {{ passive: true }});
 
     slider.addEventListener('touchend', function(e) {{
-      if (!e.changedTouches || e.changedTouches.length === 0) return;
+      if (isGestureLocked || !e.changedTouches || e.changedTouches.length === 0) return;
 
       var touchEndX = e.changedTouches[0].clientX;
       var touchEndY = e.changedTouches[0].clientY;
@@ -419,13 +414,28 @@ class ProcessingPipeline:
       var deltaY = touchEndY - touchStartY;
       var duration = Date.now() - touchStartTime;
 
-      if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {{
+      var isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) * 1.25;
+      var passedThreshold = Math.abs(deltaX) >= 48;
+
+      if (isHorizontal && passedThreshold) {{
+        isGestureLocked = true;
+        setTimeout(function() {{ isGestureLocked = false; }}, 260);
+
+        var width = window.innerWidth;
+        if (deltaX < 0) {{
+          // Finger moves Right to Left -> NEXT PAGE
+          slider.scrollLeft += width;
+        }} else {{
+          // Finger moves Left to Right -> PREVIOUS PAGE
+          slider.scrollLeft -= width;
+        }}
+      }} else if (Math.abs(deltaX) < 10 && Math.abs(deltaY) < 10 && duration < 300) {{
         var width = window.innerWidth;
         var clickX = touchEndX;
         if (clickX < width * 0.25) {{
-          turnPage(-1);
+          slider.scrollLeft -= width;
         }} else if (clickX > width * 0.75) {{
-          turnPage(1);
+          slider.scrollLeft += width;
         }} else {{
           window.ReactNativeWebView.postMessage(JSON.stringify({{ type: 'TOGGLE_CONTROLS' }}));
         }}

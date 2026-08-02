@@ -33,7 +33,7 @@ export interface LocalReaderSettings {
   id: string;
   bookId?: string | null; // null for global settings
   theme: 'light' | 'sepia' | 'dark';
-  fontFamily: 'Bookerly' | 'Literata' | 'Bitter' | 'Georgia' | 'System';
+  fontFamily: 'Baskerville' | 'Bookerly' | 'Literata' | 'Bitter' | 'Georgia' | 'System';
   fontSize: number;
   lineHeight: number;
   horizontalMargin: number;
