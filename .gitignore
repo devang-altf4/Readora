@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build & Expo
+.expo/
+dist/
+build/
+*.apk
+*.aab
+
+# Environment & Secrets
+.env
+.env.local
+.env.production
+.env.staging
+services/api/.env
+apps/mobile/.env
+apps/mobile/.env.local
+
+# Storage (keep folders, ignore contents)
+services/api/storage/originals/*
+!services/api/storage/originals/.gitkeep
+services/api/storage/covers/*
+!services/api/storage/covers/.gitkeep
+services/api/storage/processed/*
+!services/api/storage/processed/.gitkeep
+services/api/storage/temporary/*
+!services/api/storage/temporary/.gitkeep
+
+# Testing & Logs
+.pytest_cache/
+.ruff_cache/
+*.log

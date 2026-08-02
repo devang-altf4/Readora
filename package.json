@@ -1,0 +1,13 @@
+{
+  "name": "dindle-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dindle - Private personal e-reader mobile application and backend service",
+  "scripts": {
+    "mobile:start": "cd apps/mobile && npm run start",
+    "mobile:android": "cd apps/mobile && npm run android",
+    "mobile:lint": "cd apps/mobile && npm run lint",
+    "backend:dev": "cd services/api && .venv\\Scripts\\python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "backend:test": "cd services/api && .venv\\Scripts\\pytest"
+  }
+}
