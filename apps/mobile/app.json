@@ -6,7 +6,11 @@
     "scheme": "readora",
     "orientation": "portrait",
     "extra": {
-      "apiBaseUrl": "http://192.168.29.159:8000/api/v1"
+      "apiBaseUrl": "http://192.168.29.159:8000/api/v1",
+      "router": {},
+      "eas": {
+        "projectId": "6048abfb-51f1-471e-90c8-f5a5293cccda"
+      }
     },
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
