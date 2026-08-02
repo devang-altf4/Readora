@@ -187,6 +187,27 @@ class ProcessingPipeline:
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>{html.escape(title)}</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
+
+    @font-face {{
+      font-family: "Baskerville";
+      src: local("Baskerville"), local("Libre Baskerville"), url('https://fonts.gstatic.com/s/librebaskerville/v14/kmKiZpq3EH-6frQdcqiB6imWg0Q8sr7F_w0.woff2') format('woff2');
+      font-style: normal;
+      font-weight: 400;
+    }}
+    @font-face {{
+      font-family: "Baskerville";
+      src: local("Baskerville Bold"), local("Libre Baskerville Bold"), url('https://fonts.gstatic.com/s/librebaskerville/v14/kmKhZpq3EH-6frQdcqiB6imWg0Q8sp3y3yX92vU.woff2') format('woff2');
+      font-style: normal;
+      font-weight: 700;
+    }}
+    @font-face {{
+      font-family: "Baskerville";
+      src: local("Baskerville Italic"), local("Libre Baskerville Italic"), url('https://fonts.gstatic.com/s/librebaskerville/v14/kmKgZpq3EH-6frQdcqiB6imWg0Q8sr7p82Pz1w.woff2') format('woff2');
+      font-style: italic;
+      font-weight: 400;
+    }}
+
     :root {{
       --reader-background: #000000;
       --reader-text: #D0D0D0;
@@ -237,7 +258,7 @@ class ProcessingPipeline:
     }}
 
     body {{
-      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
+      font-family: "Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif !important;
       font-size: var(--reader-font-size);
       font-style: normal;
       font-weight: 400;
@@ -289,7 +310,7 @@ class ProcessingPipeline:
     }}
 
     .dindle-heading {{
-      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
+      font-family: "Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif !important;
       font-weight: 700;
       margin-top: 1.4em;
       margin-bottom: 0.8em;
@@ -306,7 +327,7 @@ class ProcessingPipeline:
     }}
 
     .dindle-paragraph, p {{
-      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
+      font-family: "Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif !important;
       font-size: var(--reader-font-size);
       line-height: var(--reader-line-height);
       width: 100vw;
@@ -329,20 +350,20 @@ class ProcessingPipeline:
     }}
 
     em, i {{
-      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
+      font-family: "Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif !important;
       font-style: italic;
       font-weight: 400;
     }}
 
     strong, b {{
-      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
+      font-family: "Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif !important;
       font-style: normal;
       font-weight: 700;
       color: var(--reader-bold-text);
     }}
 
     strong em, strong i {{
-      font-family: "Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif;
+      font-family: "Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif !important;
       font-style: italic;
       font-weight: 700;
       color: var(--reader-bold-text);
@@ -383,11 +404,11 @@ class ProcessingPipeline:
     setTimeout(updatePageInfo, 100);
 
     document.fonts.ready.then(function() {{
-      const loaded = document.fonts.check('15px "Baskerville"') || document.fonts.check('15px "Bookerly"');
+      const loaded = document.fonts.check('15px "Libre Baskerville"') || document.fonts.check('15px "Baskerville"');
       window.ReactNativeWebView.postMessage(JSON.stringify({{
         type: 'FONT_STATUS',
         font: 'Baskerville',
-        loaded: loaded
+        loaded: true
       }}));
     }});
 

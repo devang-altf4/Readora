@@ -52,7 +52,7 @@ export default function SmartReadingScreen() {
     async function loadSmartContent() {
       if (!id) return;
       try {
-        // Load local font CSS declarations
+        // Load local font CSS declarations & Baskerville webfont rules
         const fontData = await getBookerlyFontFaceStyles();
         setFontFaceCss(fontData.fontCss);
 
@@ -165,7 +165,7 @@ export default function SmartReadingScreen() {
   // Resolve CSS font-family stack based on selected font
   const resolveFontStack = (font: string) => {
     if (font === 'Baskerville') {
-      return '"Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif';
+      return '"Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif';
     } else if (font === 'Bookerly') {
       return '"Bookerly", Georgia, serif';
     } else if (font === 'Georgia') {
@@ -182,6 +182,8 @@ export default function SmartReadingScreen() {
 
     const customStyleBlock = `
       <style id="kindle-calibrated-head-styles">
+        @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&display=swap');
+
         ${fontFontFaceCss}
 
         :root {
@@ -430,7 +432,7 @@ export default function SmartReadingScreen() {
             document.documentElement.style.setProperty('--reader-font-size', data.size + 'px');
           } else if (data.type === 'SET_FONT_FAMILY') {
             var fontStack = data.fontFamily === 'Baskerville' 
-              ? '"Baskerville", "Libre Baskerville", "Baskerville Old Face", "Hoefler Text", Garamond, Georgia, serif'
+              ? '"Libre Baskerville", "Baskerville", "Baskerville Old Face", "Hoefler Text", Georgia, serif'
               : data.fontFamily === 'Bookerly' ? '"Bookerly", Georgia, serif' : 'Georgia, serif';
             document.body.style.fontFamily = fontStack;
           }
