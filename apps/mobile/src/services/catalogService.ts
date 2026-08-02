@@ -1,4 +1,5 @@
 import { BackendBookResponse } from '../types';
+import { API_CONFIG } from '../constants/config';
 import { apiClient, describeApiError } from './apiClient';
 
 const CATALOG_TIMESTAMP = '1970-01-01T00:00:00.000Z';
@@ -65,6 +66,10 @@ export function mergeCatalogBooks(available: BackendBookResponse[]): BackendBook
   const seeded = STARTER_CATALOG_BOOKS.map((fallback) => byCatalogId.get(fallback.catalogId as string) || fallback);
   const extras = available.filter((book) => !book.catalogId || !knownIds.has(book.catalogId));
   return [...seeded, ...extras];
+}
+
+export function getCatalogCoverUrl(catalogId: string): string {
+  return `${API_CONFIG.baseUrl}/catalog/${encodeURIComponent(catalogId)}/cover`;
 }
 
 export async function listCatalogBooks(): Promise<BackendBookResponse[]> {

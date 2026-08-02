@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, Image, DimensionValue } from 'react-native';
 
 interface BookCoverCardProps {
@@ -40,10 +40,21 @@ export function BookCoverCard({
   progressPct = 0,
   isNew = false,
 }: BookCoverCardProps) {
-  if (coverUri) {
+  const [imageFailed, setImageFailed] = useState(false);
+
+  useEffect(() => {
+    setImageFailed(false);
+  }, [coverUri]);
+
+  if (coverUri && !imageFailed) {
     return (
       <View style={[styles.container, { width, height }]}>
-        <Image source={{ uri: coverUri }} style={styles.coverImage} resizeMode="cover" />
+        <Image
+          source={{ uri: coverUri }}
+          style={styles.coverImage}
+          resizeMode="cover"
+          onError={() => setImageFailed(true)}
+        />
         {progressPct > 0 && (
           <View style={styles.badgeContainer}>
             <Text style={styles.badgeText}>{progressPct}%</Text>

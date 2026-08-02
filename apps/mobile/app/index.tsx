@@ -22,7 +22,12 @@ import { useAppColors } from '../src/theme/useAppColors';
 import { useThemeStore } from '../src/state/useThemeStore';
 import { BookCoverCard } from '../src/components/BookCoverCard';
 import { useAuthStore } from '../src/state/useAuthStore';
-import { addCatalogBook, listCatalogBooks, STARTER_CATALOG_BOOKS } from '../src/services/catalogService';
+import {
+  addCatalogBook,
+  getCatalogCoverUrl,
+  listCatalogBooks,
+  STARTER_CATALOG_BOOKS,
+} from '../src/services/catalogService';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -167,6 +172,7 @@ export default function LibraryScreen() {
       };
       await repo.insertBook(localBook);
       await loadBooks();
+      setActiveTab('library');
       Alert.alert('Added to Library', `${localBook.title} is ready to read.`);
     } catch (error: any) {
       Alert.alert('Could Not Add Book', error?.message || 'Please try again.');
@@ -357,6 +363,63 @@ export default function LibraryScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
+      ) : activeTab === 'library' ? (
+        <ScrollView style={styles.mainScrollView} contentContainerStyle={styles.mainScrollContent}>
+          {/* Your Library Header Row */}
+          <View style={styles.libraryActionRow}>
+            <Text style={[styles.librarySectionTitle, { color: colors.textPrimary }]}>Your Library</Text>
+
+            <View style={styles.libraryControlsRight}>
+              <TouchableOpacity
+                style={[styles.importPillButton, { backgroundColor: colors.isDark ? '#1C1C1E' : '#EAE7DC', borderColor: colors.isDark ? '#3B82F6' : '#171717' }]}
+                onPress={handleImport}
+                disabled={importing}
+              >
+                {importing ? (
+                  <ActivityIndicator size="small" color={colors.textPrimary} />
+                ) : (
+                  <Text style={[styles.importPillText, { color: colors.isDark ? '#3B82F6' : colors.textPrimary }]}>
+                    + Import Book
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.toggleViewBtn}
+                onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+              >
+                <Text style={[styles.toggleViewText, { color: colors.textPrimary }]}>
+                  {viewMode === 'grid' ? '≡ List' : '☷ Grid'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Books List or Empty State */}
+          {loading ? (
+            <ActivityIndicator size="large" color={colors.textPrimary} style={{ marginTop: 40 }} />
+          ) : filteredBooks.length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>No Books Found</Text>
+              <Text style={[styles.emptyStateSubtitle, { color: colors.textSecondary }]}>
+                Import PDF, EPUB, Kindle, HTML, TXT, or DOCX books to start reading.
+              </Text>
+              <TouchableOpacity style={[styles.emptyImportBtn, { backgroundColor: colors.accent }]} onPress={handleImport}>
+                <Text style={styles.emptyImportBtnText}>📖 Import Book</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <FlatList
+              data={filteredBooks}
+              keyExtractor={(item) => item.id}
+              renderItem={renderBookItem}
+              key={viewMode}
+              numColumns={viewMode === 'grid' ? 2 : 1}
+              scrollEnabled={false}
+              contentContainerStyle={styles.bookListContent}
+            />
+          )}
+        </ScrollView>
       ) : (
         <ScrollView style={styles.mainScrollView} contentContainerStyle={styles.mainScrollContent}>
           {/* Stitch MCP Generated Flashy Hero Welcome Card */}
@@ -449,7 +512,7 @@ export default function LibraryScreen() {
             ]}
           >
             <View style={styles.importPromptCopy}>
-              <Text style={[styles.importPromptEyebrow, { color: colors.accent }]}>YOUR BOOK, YOUR SANCTUARY</Text>
+              <Text style={[styles.importPromptEyebrow, { color: colors.isDark ? '#3B82F6' : '#855B14' }]}>YOUR BOOK, YOUR SANCTUARY</Text>
               <Text style={[styles.importPromptTitle, { color: colors.textPrimary }]}>Want to read your own book?</Text>
               <Text style={[styles.importPromptSubtitle, { color: colors.textSecondary }]}>Tap Import Book to bring a PDF, EPUB, Kindle file, or any supported format into Readora.</Text>
             </View>
@@ -476,7 +539,11 @@ export default function LibraryScreen() {
                 <Text style={[styles.librarySectionTitle, { color: colors.textPrimary }]}>Starter Library</Text>
                 <Text style={[styles.catalogHint, { color: colors.textSecondary }]}>Free for everyone</Text>
               </View>
-              <View style={styles.catalogGrid}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.catalogScrollContent}
+              >
                 {catalogBooks.map((catalogBook) => {
                   const alreadyAdded = Boolean(
                     user?.id &&
@@ -489,79 +556,29 @@ export default function LibraryScreen() {
                       <BookCoverCard
                         title={catalogBook.title || 'Untitled Book'}
                         author={catalogBook.author}
-                        height={138}
+                        coverUri={catalogBook.catalogId ? getCatalogCoverUrl(catalogBook.catalogId) : null}
+                        height={165}
                         width="100%"
                         isNew={!alreadyAdded}
                       />
-                      <Text style={[styles.catalogTitle, { color: colors.textPrimary }]} numberOfLines={2}>{catalogBook.title}</Text>
-                      <Text style={[styles.catalogAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{catalogBook.author || 'Readora Book'}</Text>
-                      <TouchableOpacity
-                        style={[styles.catalogAddButton, { backgroundColor: alreadyAdded ? colors.divider : colors.accent }]}
-                        disabled={alreadyAdded || isAdding}
-                        onPress={() => void handleAddCatalogBook(catalogBook)}
-                      >
-                        {isAdding ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.catalogAddButtonText}>{alreadyAdded ? 'In Library' : 'Add to Library'}</Text>}
-                      </TouchableOpacity>
+                      <View style={styles.catalogCardDetails}>
+                        <View>
+                          <Text style={[styles.catalogTitle, { color: colors.textPrimary }]} numberOfLines={2}>{catalogBook.title}</Text>
+                          <Text style={[styles.catalogAuthor, { color: colors.textSecondary }]} numberOfLines={1}>{catalogBook.author || 'Readora Book'}</Text>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.catalogAddButton, { backgroundColor: alreadyAdded ? colors.divider : colors.accent }]}
+                          disabled={alreadyAdded || isAdding}
+                          onPress={() => void handleAddCatalogBook(catalogBook)}
+                        >
+                          {isAdding ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.catalogAddButtonText}>{alreadyAdded ? 'In Library' : 'Add to Library'}</Text>}
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   );
                 })}
-              </View>
+              </ScrollView>
             </View>
-          )}
-
-          {/* Your Library Header Row */}
-          <View style={styles.libraryActionRow}>
-            <Text style={[styles.librarySectionTitle, { color: colors.textPrimary }]}>Your Library</Text>
-
-            <View style={styles.libraryControlsRight}>
-              <TouchableOpacity
-                style={[styles.importPillButton, { backgroundColor: colors.isDark ? '#1C1C1E' : '#EAE7DC', borderColor: colors.isDark ? '#3B82F6' : '#171717' }]}
-                onPress={handleImport}
-                disabled={importing}
-              >
-                {importing ? (
-                  <ActivityIndicator size="small" color={colors.textPrimary} />
-                ) : (
-                  <Text style={[styles.importPillText, { color: colors.isDark ? '#3B82F6' : colors.textPrimary }]}>
-                    + Import Book
-                  </Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.toggleViewBtn}
-                onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-              >
-                <Text style={[styles.toggleViewText, { color: colors.textPrimary }]}>
-                  {viewMode === 'grid' ? '≡ List' : '☷ Grid'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Books List or Empty State */}
-          {loading ? (
-            <ActivityIndicator size="large" color={colors.textPrimary} style={{ marginTop: 40 }} />
-          ) : filteredBooks.length === 0 ? (
-            <View style={styles.emptyStateContainer}>
-              <Text style={[styles.emptyStateTitle, { color: colors.textPrimary }]}>No Books Found</Text>
-              <Text style={[styles.emptyStateSubtitle, { color: colors.textSecondary }]}>
-                Import PDF, EPUB, Kindle, HTML, TXT, or DOCX books to start reading.
-              </Text>
-              <TouchableOpacity style={styles.emptyImportBtn} onPress={handleImport}>
-                <Text style={styles.emptyImportBtnText}>📖 Import Book</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <FlatList
-              data={filteredBooks}
-              keyExtractor={(item) => item.id}
-              renderItem={renderBookItem}
-              key={viewMode}
-              numColumns={viewMode === 'grid' ? 2 : 1}
-              scrollEnabled={false}
-              contentContainerStyle={styles.bookListContent}
-            />
           )}
         </ScrollView>
       )}
@@ -824,40 +841,44 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
-  catalogGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 10,
-    paddingVertical: 2,
+  catalogScrollContent: {
+    gap: 12,
+    paddingRight: 16,
+    paddingVertical: 4,
   },
   catalogCard: {
-    width: '31.5%',
-    padding: 6,
-    borderRadius: 10,
+    width: 145,
+    padding: 8,
+    borderRadius: 12,
     borderWidth: 1,
+    justifyContent: 'space-between',
+  },
+  catalogCardDetails: {
+    flex: 1,
+    justifyContent: 'space-between',
+    marginTop: 8,
   },
   catalogTitle: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
-    lineHeight: 14,
-    marginTop: 7,
+    lineHeight: 16,
+    minHeight: 32,
   },
   catalogAuthor: {
-    fontSize: 9,
+    fontSize: 10,
     marginTop: 2,
-    marginBottom: 7,
+    marginBottom: 8,
   },
   catalogAddButton: {
-    minHeight: 30,
-    borderRadius: 6,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 3,
+    paddingHorizontal: 6,
   },
   catalogAddButtonText: {
     color: '#FFFFFF',
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '700',
   },
   libraryActionRow: {

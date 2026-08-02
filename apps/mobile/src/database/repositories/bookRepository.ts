@@ -44,7 +44,7 @@ export class BookSQLiteRepository {
         id, localFileUri, originalFileName, title, author, coverUri, fileSize, fileHash,
         totalPages, currentPage, readingProgress, lastOpenedAt, importedAt, updatedAt, ownerUserId,
         backendBookId, backendProcessingStatus, backendProcessingProgress, smartModeAvailable, cachedSmartContentUri
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         book.id,
         book.localFileUri,

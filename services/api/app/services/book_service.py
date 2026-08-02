@@ -176,6 +176,9 @@ class BookService:
     async def list_catalog(self, limit: int = 50) -> List[Dict[str, Any]]:
         return await self.repo.list_catalog_books(limit=limit)
 
+    async def get_catalog_book(self, catalog_id: str) -> Optional[Dict[str, Any]]:
+        return await self.repo.get_catalog_book(catalog_id)
+
     async def add_catalog_book(self, user_id: str, catalog_id: str) -> Optional[Dict[str, Any]]:
         catalog_book = await self.repo.get_catalog_book(catalog_id)
         if not catalog_book:

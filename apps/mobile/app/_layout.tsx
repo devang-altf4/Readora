@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { SQLiteProvider } from 'expo-sqlite';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -39,31 +39,39 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider style={{ backgroundColor: colors.bg }}>
       <QueryClientProvider client={queryClient}>
-        <SQLiteProvider databaseName="dindle.db" onInit={initializeDatabase}>
-          <StatusBar style={colors.isDark ? 'light' : 'dark'} backgroundColor={colors.bg} />
-          <Stack
-            screenOptions={{
-              headerStyle: {
-                backgroundColor: colors.bg,
-              },
-              headerTintColor: colors.textPrimary,
-              headerTitleStyle: {
-                fontWeight: '600',
-              },
-              contentStyle: {
-                backgroundColor: colors.bg,
-              },
-            }}
-          >
-            <Stack.Screen name="auth" options={{ headerShown: false }} />
-            <Stack.Screen name="index" options={{ headerShown: false }} />
-            <Stack.Screen name="book/[id]" options={{ title: 'Book Details' }} />
-            <Stack.Screen name="reader/pdf/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="reader/smart/[id]" options={{ headerShown: false }} />
-            <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
-            <Stack.Screen name="about/index" options={{ title: 'About Dindle' }} />
-          </Stack>
-        </SQLiteProvider>
+        <Suspense
+          fallback={
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg }}>
+              <ActivityIndicator color={colors.textPrimary} />
+            </View>
+          }
+        >
+          <SQLiteProvider databaseName="dindle.db" onInit={initializeDatabase} useSuspense>
+            <StatusBar style={colors.isDark ? 'light' : 'dark'} backgroundColor={colors.bg} />
+            <Stack
+              screenOptions={{
+                headerStyle: {
+                  backgroundColor: colors.bg,
+                },
+                headerTintColor: colors.textPrimary,
+                headerTitleStyle: {
+                  fontWeight: '600',
+                },
+                contentStyle: {
+                  backgroundColor: colors.bg,
+                },
+              }}
+            >
+              <Stack.Screen name="auth" options={{ headerShown: false }} />
+              <Stack.Screen name="index" options={{ headerShown: false }} />
+              <Stack.Screen name="book/[id]" options={{ title: 'Book Details' }} />
+              <Stack.Screen name="reader/pdf/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="reader/smart/[id]" options={{ headerShown: false }} />
+              <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
+              <Stack.Screen name="about/index" options={{ title: 'About Dindle' }} />
+            </Stack>
+          </SQLiteProvider>
+        </Suspense>
       </QueryClientProvider>
     </SafeAreaProvider>
   );

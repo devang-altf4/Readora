@@ -24,7 +24,7 @@ export function useAppColors() {
     chipActiveBorder: isDark ? '#3B82F6' : '#171717',
     chipActiveText: '#FFFFFF',
     bottomBarBg: isDark ? '#000000' : '#F5F3EC',
-    accent: '#3B82F6',
+    accent: isDark ? '#3B82F6' : '#171717',
     welcomeBannerBg: isDark ? '#0D1527' : '#F3EEE3',
     welcomeBannerBorder: isDark ? 'rgba(59, 130, 246, 0.25)' : '#E2D9C8',
     welcomeBannerText: isDark ? '#FFFFFF' : '#1C1917',

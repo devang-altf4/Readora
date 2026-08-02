@@ -6,6 +6,8 @@ from app.api.dependencies import get_book_service, get_current_user
 from app.catalog import ensure_catalog_books
 from app.schemas.book import BookResponse
 from app.services.book_service import BookService
+from app.storage.local_storage import storage_service
+from fastapi.responses import Response
 
 
 router = APIRouter(prefix="/catalog", tags=["Catalog"])
@@ -40,3 +42,21 @@ async def add_catalog_book(
             detail="Catalog book not found.",
         )
     return book
+
+
+@router.api_route("/{catalog_id}/cover", methods=["GET", "HEAD"])
+async def get_catalog_cover(
+    catalog_id: str,
+    book_service: BookService = Depends(get_book_service),
+):
+    """Serve shared starter-book artwork without exposing private user covers."""
+    book = await book_service.get_catalog_book(catalog_id)
+    if not book:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Catalog book not found.")
+
+    cover_key = book.get("storage", {}).get("coverKey")
+    if not cover_key or not await storage_service.file_exists(cover_key):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cover image not available.")
+
+    cover_bytes = await storage_service.get_file_bytes(cover_key)
+    return Response(content=cover_bytes, media_type="image/jpeg")
