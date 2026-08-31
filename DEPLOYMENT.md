@@ -28,7 +28,7 @@ repository; users see the shared shelf and can add their own library copy.
 After deploy, verify:
 
 ```text
-https://<service>.onrender.com/api/v1/health
+https://readora-xkki.onrender.com/api/v1/health
 ```
 
 ## Point the mobile app at Render
@@ -36,7 +36,7 @@ https://<service>.onrender.com/api/v1/health
 `apps/mobile/src/constants/config.ts` already prioritizes `EXPO_PUBLIC_API_BASE_URL`. Set it to:
 
 ```text
-https://<service>.onrender.com/api/v1
+https://readora-xkki.onrender.com/api/v1
 ```
 
 Use that value in the EAS project environment for both the `preview` and `production` environments. Do not ship the current LAN URL in a friends/Play Store build.

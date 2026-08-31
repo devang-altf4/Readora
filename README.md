@@ -97,7 +97,7 @@ npx expo start
 - **Root Directory**: `services/api`
 - **Build Command**: `pip install -r requirements.txt`
 - **Start Command**: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-- **Health Endpoint**: `https://YOUR-APP.onrender.com/api/v1/health` *(Keep awake via UptimeRobot every 5 mins)*
+- **Health Endpoint**: `https://readora-xkki.onrender.com/api/v1/health` *(Keep awake via UptimeRobot every 5 mins)*
 
 ### Mobile App Build (Expo EAS)
 ```bash

@@ -79,11 +79,11 @@ export default function SettingsScreen() {
           style={[styles.input, { backgroundColor: colors.bg, color: colors.textPrimary }]}
           value={apiUrl}
           onChangeText={setApiUrl}
-          placeholder="http://192.168.29.159:8000/api/v1"
+          placeholder="https://readora-xkki.onrender.com/api/v1"
           placeholderTextColor={colors.textSecondary}
         />
         <Text style={[styles.hint, { color: colors.textSecondary }]}>
-          Auto-detected machine LAN IP: {DEFAULT_API_BASE_URL}
+          Current backend URL: {DEFAULT_API_BASE_URL}
         </Text>
       </View>
 

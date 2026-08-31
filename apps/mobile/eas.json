@@ -8,6 +8,9 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://readora-xkki.onrender.com/api/v1"
       }
     },
     "production": {
@@ -15,6 +18,9 @@
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "https://readora-xkki.onrender.com/api/v1"
       }
     }
   }
